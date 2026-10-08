@@ -16,7 +16,6 @@ st.set_page_config(
     initial_sidebar_state="expanded" # บังคับให้ Sidebar กางออกเสมอ
 )
 
-# สร้าง Session State สำหรับเก็บคีย์ของ File Uploader
 if "dad_uploader_key" not in st.session_state:
     st.session_state["dad_uploader_key"] = 0
 
@@ -132,14 +131,14 @@ system_css = """
 """
 
 # ==========================================
-# 3. Sidebar UI (แผงควบคุมหลักด้านซ้าย)
+# 3. Sidebar UI (แผงควบคุมหลักด้านซ้ายกลับมาแล้ว)
 # ==========================================
 with st.sidebar:
     st.header("⚙️ แผงควบคุม (Controls)")
     theme_choice = st.radio("🎨 เลือกโทนสีหน้าจอ (Theme):", ["Dark", "Bright", "System"], index=0, horizontal=True)
     st.markdown("---")
     
-    # กล่องอัปโหลดไฟล์จะอยู่ที่ Sidebar เสมอ
+    # กล่องอัปโหลดไฟล์จะอยู่ที่ Sidebar
     uploaded_files = st.file_uploader(
         "📁 อัปโหลดไฟล์ YOKOGAWA (.DAD)", 
         type=["dad", "DAD"],
@@ -152,10 +151,10 @@ with st.sidebar:
         st.session_state["dad_uploader_key"] += 1 
         st.rerun()
 
-    # สร้างพื้นที่ว่างไว้สำหรับใส่ปุ่ม Export ด้านล่างปุ่มเคลียร์
+    # พื้นที่สำหรับปุ่ม Export ด้านล่าง Sidebar
     export_placeholder = st.container()
 
-# ฉีด (Inject) CSS ลงไปในระบบตาม Theme ที่ผู้ใช้กดเลือก
+# ฉีด CSS ตาม Theme ที่เลือก
 if theme_choice == "Dark":
     st.markdown(dark_css, unsafe_allow_html=True)
 elif theme_choice == "Bright":
@@ -166,13 +165,18 @@ else:
 # ==========================================
 # 4. Main UI (หน้าจอหลักแสดงผลกราฟ)
 # ==========================================
+credit_color = "#8b949e" if theme_choice == "Dark" else "#6c757d" if theme_choice == "Bright" else "gray"
+
 title_placeholder = st.empty()
-title_placeholder.title("🏭 Recorder Furnace from YOKOGAWA (.DAD Data)")
+title_placeholder.title("🏭 Recorder NB1 and NB2 Furnace from YOKOGAWA (.DAD Data)")
+
+st.markdown(f"<p style='color: {credit_color}; font-size: 0.88rem; margin-top: -15px; margin-bottom: 15px;'><i>Wichien Laithanakit - Brazing Engineer - VSTS / Power Chonburi</i></p>", unsafe_allow_html=True)
+
 file_names_placeholder = st.empty() 
 st.markdown("---")
 
 # ==========================================
-# 5. DAD Parser Logic 
+# 5. DAD Parser Logic (อ่านเฉพาะค่า MAX)
 # ==========================================
 def find_dad_params(raw, machine_type):
     default_rs = 84 if machine_type == "NB2" else 88
@@ -194,7 +198,7 @@ def find_dad_params(raw, machine_type):
                         return offset, rs, (rs - 8) // 4
     return default_offset, default_rs, (default_rs - 8) // 4
 
-@st.cache_data(show_spinner="⏳ กำลังประมวลผลไฟล์ .DAD...")
+@st.cache_data(show_spinner="⏳ กำลังประมวลผลไฟล์ .DAD (ดึงเฉพาะค่า MAX)...")
 def parse_dad_to_df(files_data):
     all_records = []
     machine_type = "Unknown"
@@ -214,7 +218,6 @@ def parse_dad_to_df(files_data):
             if len(hdr) < 8: break
             yr, mo, dy, hr, mn, sc = hdr[0], hdr[1], hdr[2], hdr[3], hdr[4], hdr[5]
             
-            # บล็อกวันที่เบื้องต้น (รองรับปี 2020-2050)
             if not (20 <= yr <= 50 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59):
                 continue
             try:
@@ -227,9 +230,12 @@ def parse_dad_to_df(files_data):
             for ci in range(min(num_ch, 40)): 
                 data_pos = base + 8 + ci*4
                 if data_pos + 4 > len(raw): break
-                min_v = struct.unpack_from('>h', raw, data_pos)[0]
+                
+                # อ่านค่า max_v (2 Bytes หลังของ 4 Bytes ต่อ Channel)
                 max_v = struct.unpack_from('>h', raw, data_pos + 2)[0]
-                if min_v not in (-32768, -32767, 32767) and max_v not in (-32768, -32767, 32767):
+                
+                # กรองค่า Out-of-Range Sensor (-32768, 32767) ออก
+                if max_v not in (-32768, -32767, 32767) and (-30000 < max_v < 30000):
                     val = max_v / 10.0
                     if -100.0 <= val <= 2000.0:
                         rec[f'CH{(ci+1):03d}'] = val
@@ -238,25 +244,14 @@ def parse_dad_to_df(files_data):
                         rec[f'CH{(ci+1):03d}'] = None
                 else:
                     rec[f'CH{(ci+1):03d}'] = None
+                    
             if valid_data:
                 all_records.append(rec)
                 
     df = pd.DataFrame(all_records)
     if not df.empty:
-        # ==========================================
-        # 🟢 ตัวกรองวันที่ 2 ชั้น (แก้ปัญหากราฟไม่แสดง/ปี 2047)
-        # ==========================================
-        # ชั้นที่ 1: หาค่ากลาง (Median) เพื่อดูว่าข้อมูลส่วนใหญ่อยู่ช่วงเวลาไหน และตัดขยะทิ้ง
-        median_date = df["DateTime"].quantile(0.5)
-        df_clean = df[abs(df["DateTime"] - median_date) < pd.Timedelta(days=7)]
+        df = df.drop_duplicates(subset=["DateTime"]).sort_values("DateTime").reset_index(drop=True)
         
-        # ชั้นที่ 2: หาค่า Max Date จากกลุ่มข้อมูลที่ถูกต้องแล้ว เพื่อเอาเฉพาะรอบล่าสุด
-        if not df_clean.empty:
-            max_date = df_clean["DateTime"].max()
-            df = df_clean[abs(df_clean["DateTime"] - max_date) < pd.Timedelta(days=1)]
-        else:
-            df = df_clean
-            
         for i in range(1, 8): df[f"Top Zone #{i}"] = df.get(f"CH{i:03d}")
         for i in range(1, 8): df[f"Bottom Zone #{i}"] = df.get(f"CH{i+7:03d}")
         df["EXIT O2"] = df.get("CH015")
@@ -271,12 +266,12 @@ def parse_dad_to_df(files_data):
             df["N2 Flow"] = None
             df["DEW POINT"] = None
             
-        df = df.drop_duplicates(subset=["DateTime"]).sort_values("DateTime").reset_index(drop=True)
+        df = df.sort_values("DateTime").reset_index(drop=True)
         
     return df, machine_type
 
 # ==========================================
-# 6. ฟังก์ชันสร้างกราฟอัจฉริยะแบบปรับสีตาม Theme
+# 6. ฟังก์ชันสร้างกราฟ
 # ==========================================
 def apply_industrial_style(fig, y_title, theme_mode, is_dual_axis=False):
     if theme_mode == "Dark":
@@ -462,7 +457,7 @@ if uploaded_files:
         df, detected_machine = parse_dad_to_df(files_data)
         
         if df.empty:
-            st.warning("⚠️ ไม่พบข้อมูลที่สามารถอ่านได้ในไฟล์ที่อัปโหลด หรือข้อมูลไม่ผ่านเกณฑ์การกรองวันที่")
+            st.warning("⚠️ ไม่พบข้อมูลที่สามารถอ่านได้ในไฟล์ที่อัปโหลด")
             st.stop()
             
         title_placeholder.title(f"🏭 Recorder {detected_machine} Furnace from YOKOGAWA (.DAD Data)")
@@ -471,9 +466,9 @@ if uploaded_files:
         subtext_color = "#a0aab2" if theme_choice == "Dark" else "#666666" if theme_choice == "Bright" else "gray"
         file_names_placeholder.markdown(f"<span style='color:{subtext_color}; font-size:1.1rem;'><b>📁 File(s):</b> {file_names_str}</span>", unsafe_allow_html=True)
         
-        st.success(f"รวมข้อมูลสำเร็จ {len(uploaded_files)} ไฟล์ ({len(df)} แถว) - แสดงผลโดยใช้ค่า MAX")
+        st.success(f"รวมข้อมูลสำเร็จ {len(uploaded_files)} ไฟล์ ({len(df)} แถว) - อ่านเฉพาะค่า MAX")
         
-        # สร้างกราฟ
+        # แสดงผลกราฟ
         st.plotly_chart(create_unified_figure(df, detected_machine, 0, theme_choice), use_container_width=True)
         st.plotly_chart(create_unified_figure(df, detected_machine, 1, theme_choice), use_container_width=True)
         st.plotly_chart(create_unified_figure(df, detected_machine, 2, theme_choice), use_container_width=True)
