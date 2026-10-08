@@ -166,8 +166,15 @@ else:
 # ==========================================
 # 4. Main UI (หน้าจอหลักแสดงผลกราฟ)
 # ==========================================
+# กำหนดสีตัวหนังสือสำหรับเครดิตตาม Theme
+credit_color = "#8b949e" if theme_choice == "Dark" else "#6c757d" if theme_choice == "Bright" else "gray"
+
 title_placeholder = st.empty()
-title_placeholder.title("🏭 Recorder Furnace from YOKOGAWA (.DAD Data)")
+title_placeholder.title("🏭 Recorder NB1 and NB2 Furnace from YOKOGAWA (.DAD Data)")
+
+# แสดงเครดิตด้านล่างชื่อเรื่อง
+st.markdown(f"<p style='color: {credit_color}; font-size: 0.88rem; margin-top: -15px; margin-bottom: 15px;'><i>Wichien Laithanakit - Brazing Engineer - VSTS / Power Chonburi</i></p>", unsafe_allow_html=True)
+
 file_names_placeholder = st.empty() 
 st.markdown("---")
 
