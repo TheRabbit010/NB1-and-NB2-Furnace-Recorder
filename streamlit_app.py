@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 import io
+import re
 
 # ==========================================
 # 1. Page Config Setup
@@ -20,50 +21,34 @@ if "dad_uploader_key" not in st.session_state:
     st.session_state["dad_uploader_key"] = 0
 
 # ==========================================
-# 2. CSS Injector (แก้ไข CSS ไม่ให้บัง Sidebar)
+# 2. CSS Injector (เปิดให้เห็น Sidebar ชัดเจน ไม่บังธีม)
 # ==========================================
 st.markdown("""
     <style>
-        /* ปรับแต่ง Sidebar ให้เห็นชัดเจน ไม่โดนสีพื้นหลังทับ */
+        /* เปิดให้เห็น Sidebar ชัดเจน ไม่โดนพื้นหลังบัง */
         [data-testid="stSidebar"] {
-            background-color: #161b22 !important;
-            border-right: 1px solid #30363d !important;
-        }
-        [data-testid="stSidebarHeader"] {
-            background-color: #161b22 !important;
+            border-right: 1px solid rgba(128, 128, 128, 0.2) !important;
         }
         
-        /* ปุ่มเปิด-ปิด Sidebar ให้เป็นสีทองเห็นชัดเจน */
+        /* ปุ่มเปิด-ปิด Sidebar เด่นชัด */
         button[kind="header"], [data-testid="collapsedControl"], [data-testid="stSidebarCollapseButton"] {
             color: #F0B90B !important;
-            background-color: #21262d !important;
-            border-radius: 4px !important;
-        }
-        button[kind="header"] svg, [data-testid="collapsedControl"] svg, [data-testid="stSidebarCollapseButton"] svg {
-            fill: #F0B90B !important;
         }
 
-        /* ปุ่มกดและกล่อง Uploader ใน Sidebar */
+        /* ปุ่มและปุ่มดาวน์โหลด */
         div.stButton > button, [data-testid="stDownloadButton"] > button {
-            background-color: #21262d !important;
-            color: #ffffff !important;
             border: 1px solid #F0B90B !important;
             font-weight: bold !important;
             width: 100%;
-        }
-        div.stButton > button:hover, [data-testid="stDownloadButton"] > button:hover {
-            background-color: #F0B90B !important;
-            color: #000000 !important;
         }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. Sidebar UI (แผงควบคุมหลักฝั่งซ้าย)
+# 3. Sidebar UI (นำตัวเลือก Theme ออก เหลือเฉพาะส่วนอัปโหลดและ Export)
 # ==========================================
 with st.sidebar:
     st.header("⚙️ แผงควบคุม (Controls)")
-    theme_choice = st.radio("🎨 เลือกโทนสีหน้าจอ (Theme):", ["Dark", "Bright", "System"], index=0, horizontal=True)
     st.markdown("---")
     
     uploaded_files = st.file_uploader(
@@ -83,48 +68,58 @@ with st.sidebar:
 # ==========================================
 # 4. Main UI Header
 # ==========================================
-credit_color = "#8b949e" if theme_choice == "Dark" else "#6c757d" if theme_choice == "Bright" else "gray"
-
 title_placeholder = st.empty()
 title_placeholder.title("🏭 Recorder NB1 and NB2 Furnace from YOKOGAWA (.DAD Data)")
 
-st.markdown(f"<p style='color: {credit_color}; font-size: 0.88rem; margin-top: -15px; margin-bottom: 15px;'><i>Wichien Laithanakit - Brazing Engineer - VSTS / Power Chonburi</i></p>", unsafe_allow_html=True)
+st.markdown("<p style='font-size: 0.88rem; margin-top: -15px; margin-bottom: 15px; opacity: 0.7;'><i>Wichien Laithanakit - Brazing Engineer - VSTS / Power Chonburi</i></p>", unsafe_allow_html=True)
 
 file_names_placeholder = st.empty() 
 st.markdown("---")
 
 # ==========================================
-# 5. DAD Parser Logic (แก้ไขการเรียงเวลาและค่า MAX)
+# 5. DAD Parser Logic (แก้ไขแกน X เวลาให้ตรงกับชื่อไฟล์และข้อมูลจริง)
 # ==========================================
+def extract_date_from_filename(filename):
+    """ ถอดรหัสวันที่จากชื่อไฟล์ Yokogawa เช่น 032229_260917_203440.DAD -> 2026-09-17 """
+    match = re.search(r'_(\d{2})(\d{2})(\d{2})_', filename)
+    if match:
+        yr, mo, dy = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        if 1 <= mo <= 12 and 1 <= dy <= 31:
+            full_yr = 2000 + yr if yr < 80 else 1900 + yr
+            return full_yr, mo, dy
+    return None
+
 def find_dad_params(raw, machine_type):
     default_rs = 84 if machine_type == "NB2" else 88
     default_offset = 15008
     if default_offset + default_rs * 2 < len(raw):
         yr, mo, dy, hr, mn, sc = raw[default_offset:default_offset+6]
-        if 20 <= yr <= 50 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59:
-            yr2, mo2, dy2 = raw[default_offset+default_rs:default_offset+default_rs+3]
-            if 20 <= yr2 <= 50 and 1 <= mo2 <= 12 and 1 <= dy2 <= 31:
-                return default_offset, default_rs, (default_rs - 8) // 4
+        if 0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59:
+            return default_offset, default_rs, (default_rs - 8) // 4
+            
     max_search = min(30000, len(raw) - 200)
     for offset in range(14000, max_search):
         yr, mo, dy, hr, mn, sc = raw[offset], raw[offset+1], raw[offset+2], raw[offset+3], raw[offset+4], raw[offset+5]
-        if 20 <= yr <= 50 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59:
+        if 0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59:
             for rs in [84, 88, 92, 80, 96]:
                 if offset + rs + 5 < len(raw):
-                    yr2, mo2, dy2, hr2, mn2, sc2 = raw[offset+rs], raw[offset+rs+1], raw[offset+rs+2], raw[offset+rs+3], raw[offset+rs+4], raw[offset+rs+5]
-                    if 20 <= yr2 <= 50 and 1 <= mo2 <= 12 and 1 <= dy2 <= 31 and 0 <= hr2 <= 23 and 0 <= mn2 <= 59 and 0 <= sc2 <= 59:
+                    yr2, mo2, dy2 = raw[offset+rs], raw[offset+rs+1], raw[offset+rs+2]
+                    if 0 <= yr2 <= 99 and 1 <= mo2 <= 12 and 1 <= dy2 <= 31:
                         return offset, rs, (rs - 8) // 4
     return default_offset, default_rs, (default_rs - 8) // 4
 
-@st.cache_data(show_spinner="⏳ กำลังประมวลผลไฟล์ .DAD (อ่านเฉพาะค่า MAX)...")
+@st.cache_data(show_spinner="⏳ กำลังประมวลผลไฟล์ .DAD (แก้ไขแกน X เวลาถูกต้อง)...")
 def parse_dad_to_df(files_data):
     all_records = []
     machine_type = "Unknown"
+    
     for fname, raw in files_data:
         if "_DATA" in fname.upper():
             machine_type = "NB2"
         else:
             machine_type = "NB1"
+            
+        file_date_hint = extract_date_from_filename(fname)
         offset, record_size, num_ch = find_dad_params(raw, machine_type)
         body_len = len(raw) - offset
         if body_len <= 0: continue
@@ -136,10 +131,20 @@ def parse_dad_to_df(files_data):
             if len(hdr) < 8: break
             yr, mo, dy, hr, mn, sc = hdr[0], hdr[1], hdr[2], hdr[3], hdr[4], hdr[5]
             
-            if not (20 <= yr <= 50 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59):
+            # บล็อกวันที่ให้ตรงกับข้อมูลจริง
+            if not (0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59):
                 continue
+                
+            full_year = (2000 + yr) if yr < 80 else (1900 + yr)
+            
+            # ยืนยันปี/เดือน/วันกับชื่อไฟล์หากมีข้อมูล
+            if file_date_hint:
+                hint_yr, hint_mo, hint_dy = file_date_hint
+                if abs(full_year - hint_yr) > 2:
+                    full_year, mo, dy = hint_yr, hint_mo, hint_dy
+                    
             try:
-                ts = datetime(2000 + yr, mo, dy, hr, mn, sc)
+                ts = datetime(full_year, mo, dy, hr, mn, sc)
             except ValueError:
                 continue
                 
@@ -149,10 +154,9 @@ def parse_dad_to_df(files_data):
                 data_pos = base + 8 + ci*4
                 if data_pos + 4 > len(raw): break
                 
-                # อ่านเฉพาะค่า MAX (2 Bytes หลังของโครงสร้างข้อมูล Channel)
+                # อ่านเฉพาะค่า MAX
                 max_v = struct.unpack_from('>h', raw, data_pos + 2)[0]
                 
-                # กรองค่าสัญญาณหลุด/Error (-32768, 32767)
                 if max_v not in (-32768, -32767, 32767) and (-30000 < max_v < 30000):
                     val = max_v / 10.0
                     if -100.0 <= val <= 2000.0:
@@ -168,8 +172,12 @@ def parse_dad_to_df(files_data):
                 
     df = pd.DataFrame(all_records)
     if not df.empty:
-        # **จุดสำคัญแก้กราฟเพี้ยน:** ลบเวลาซ้ำ และจัดเรียงจากอดีตไปปัจจุบันอย่างเป็นลำดับ
+        # ลบข้อมูลเวลาซ้ำ และจัดเรียงเวลาจากน้อยไปมาก
         df = df.drop_duplicates(subset=["DateTime"]).sort_values("DateTime").reset_index(drop=True)
+        
+        # กรองเฉพาะช่วงเวลาที่สมเหตุสมผลสำหรับไฟล์ที่อัปโหลด (ตัดเวลาหลุดขยะออก)
+        median_dt = df["DateTime"].iloc[len(df)//2]
+        df = df[abs(df["DateTime"] - median_dt) <= pd.Timedelta(days=10)]
         
         for i in range(1, 8): df[f"Top Zone #{i}"] = df.get(f"CH{i:03d}")
         for i in range(1, 8): df[f"Bottom Zone #{i}"] = df.get(f"CH{i+7:03d}")
@@ -192,23 +200,15 @@ def parse_dad_to_df(files_data):
 # ==========================================
 # 6. ฟังก์ชันสร้างกราฟ
 # ==========================================
-def apply_industrial_style(fig, y_title, theme_mode, is_dual_axis=False):
-    t_bg = "#161b22" if theme_mode == "Dark" else "#ffffff" if theme_mode == "Bright" else "rgba(0,0,0,0)"
-    t_paper = "#0e1117" if theme_mode == "Dark" else "#f4f6f9" if theme_mode == "Bright" else "rgba(0,0,0,0)"
-    t_font = "#ffffff" if theme_mode == "Dark" else "#1a1a1a" if theme_mode == "Bright" else "gray"
-    t_grid = "rgba(255,255,255,0.08)" if theme_mode == "Dark" else "rgba(0,0,0,0.1)"
-    t_line = "#555555" if theme_mode == "Dark" else "#cccccc"
-
+def apply_industrial_style(fig, y_title, is_dual_axis=False):
     layout_args = dict(
-        plot_bgcolor=t_bg,
-        paper_bgcolor=t_paper,
         hovermode="x unified",
         showlegend=True,
         legend=dict(
-            font=dict(color=t_font, size=12, family="Arial Bold"),
+            font=dict(size=12, family="Arial Bold"),
             bgcolor="rgba(128, 128, 128, 0.1)",
-            bordercolor=t_line,
-            borderwidth=1.5,
+            bordercolor="gray",
+            borderwidth=1,
             orientation="v",
             yanchor="top",
             y=1,
@@ -216,27 +216,22 @@ def apply_industrial_style(fig, y_title, theme_mode, is_dual_axis=False):
             x=1.02
         ),
         xaxis=dict(
-            title=dict(text="Absolute Time [Date & Time]", font=dict(color=t_font, size=12)),
-            tickfont=dict(color=t_font, size=10),
+            title=dict(text="Absolute Time [Date & Time]", font=dict(size=12)),
+            tickfont=dict(size=10),
             showgrid=True,
-            gridcolor=t_grid,
-            linecolor=t_line,
             type="date",
         ),
         yaxis=dict(
-            title=dict(text=y_title, font=dict(color=t_font, size=12)),
-            tickfont=dict(color=t_font, size=10),
+            title=dict(text=y_title, font=dict(size=12)),
+            tickfont=dict(size=10),
             showgrid=True,
-            gridcolor=t_grid,
             zeroline=False,
-            linecolor=t_line,
         ),
         height=480, 
     )
     fig.update_layout(**layout_args)
-    return t_font
 
-def create_unified_figure(df, machine_type, initial_idx, theme_mode):
+def create_unified_figure(df, machine_type, initial_idx):
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     traces_info = []
     
@@ -282,11 +277,7 @@ def create_unified_figure(df, machine_type, initial_idx, theme_mode):
     if machine_type == "NB1":
         buttons.append(dict(label="5. Dew Point", method="update", args=[{"visible": [t == 4 for t in traces_info]}, {"title.text": "<b>5. Dew point 'Cdp (CH020)</b>", "yaxis.title.text": "Dew Point (°Cdp)", "yaxis.range": [-100, 10], "yaxis2.visible": False}]))
 
-    btn_bg = "rgba(22, 27, 34, 0.8)" if theme_mode == "Dark" else "rgba(255, 255, 255, 0.9)" if theme_mode == "Bright" else "rgba(128, 128, 128, 0.2)"
-    btn_font = "#FFFFFF" if theme_mode == "Dark" else "#0056b3" if theme_mode == "Bright" else "gray"
-    btn_border = "rgba(240, 185, 11, 0.5)" if theme_mode == "Dark" else "rgba(0, 86, 179, 0.5)" if theme_mode == "Bright" else "rgba(128, 128, 128, 0.5)"
-
-    title_font_color = apply_industrial_style(fig, "Temperature (°C)", theme_mode, is_dual_axis=True)
+    apply_industrial_style(fig, "Temperature (°C)", is_dual_axis=True)
     
     initial_title = buttons[initial_idx]["args"][1]["title.text"]
     initial_y_title = buttons[initial_idx]["args"][1]["yaxis.title.text"]
@@ -296,7 +287,7 @@ def create_unified_figure(df, machine_type, initial_idx, theme_mode):
     fig.update_layout(
         title=dict(
             text=initial_title, 
-            font=dict(size=18, color=title_font_color),
+            font=dict(size=18),
             x=0.0,
             y=0.98,
             xref="paper",
@@ -326,9 +317,9 @@ def create_unified_figure(df, machine_type, initial_idx, theme_mode):
                 xanchor="left",
                 yanchor="bottom",
                 buttons=buttons,
-                font=dict(color=btn_font, size=11, family="Arial Bold"),
-                bgcolor=btn_bg,  
-                bordercolor=btn_border,
+                font=dict(size=11, family="Arial Bold"),
+                bgcolor="rgba(128, 128, 128, 0.1)",  
+                bordercolor="gray",
             )
         ]
     )
@@ -360,18 +351,18 @@ if uploaded_files:
         title_placeholder.title(f"🏭 Recorder {detected_machine} Furnace from YOKOGAWA (.DAD Data)")
         file_names_str = ", ".join([f.name for f in uploaded_files])
         
-        subtext_color = "#a0aab2" if theme_choice == "Dark" else "#666666" if theme_choice == "Bright" else "gray"
-        file_names_placeholder.markdown(f"<span style='color:{subtext_color}; font-size:1.1rem;'><b>📁 File(s):</b> {file_names_str}</span>", unsafe_allow_html=True)
+        file_names_placeholder.markdown(f"<span style='font-size:1.1rem;'><b>📁 File(s):</b> {file_names_str}</span>", unsafe_allow_html=True)
         
         st.success(f"รวมข้อมูลสำเร็จ {len(uploaded_files)} ไฟล์ ({len(df)} แถว) - แสดงผลเฉพาะค่า MAX")
         
-        st.plotly_chart(create_unified_figure(df, detected_machine, 0, theme_choice), use_container_width=True)
-        st.plotly_chart(create_unified_figure(df, detected_machine, 1, theme_choice), use_container_width=True)
-        st.plotly_chart(create_unified_figure(df, detected_machine, 2, theme_choice), use_container_width=True)
-        st.plotly_chart(create_unified_figure(df, detected_machine, 3, theme_choice), use_container_width=True)
+        # แสดงผลกราฟ
+        st.plotly_chart(create_unified_figure(df, detected_machine, 0), use_container_width=True)
+        st.plotly_chart(create_unified_figure(df, detected_machine, 1), use_container_width=True)
+        st.plotly_chart(create_unified_figure(df, detected_machine, 2), use_container_width=True)
+        st.plotly_chart(create_unified_figure(df, detected_machine, 3), use_container_width=True)
         
         if detected_machine == "NB1":
-            st.plotly_chart(create_unified_figure(df, detected_machine, 4, theme_choice), use_container_width=True)
+            st.plotly_chart(create_unified_figure(df, detected_machine, 4), use_container_width=True)
 
         with export_placeholder:
             st.markdown("---")
