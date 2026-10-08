@@ -21,21 +21,16 @@ if "dad_uploader_key" not in st.session_state:
     st.session_state["dad_uploader_key"] = 0
 
 # ==========================================
-# 2. CSS Injector (เปิดให้เห็น Sidebar ชัดเจน ไม่บังธีม)
+# 2. CSS Injector
 # ==========================================
 st.markdown("""
     <style>
-        /* เปิดให้เห็น Sidebar ชัดเจน ไม่โดนพื้นหลังบัง */
         [data-testid="stSidebar"] {
             border-right: 1px solid rgba(128, 128, 128, 0.2) !important;
         }
-        
-        /* ปุ่มเปิด-ปิด Sidebar เด่นชัด */
         button[kind="header"], [data-testid="collapsedControl"], [data-testid="stSidebarCollapseButton"] {
             color: #F0B90B !important;
         }
-
-        /* ปุ่มและปุ่มดาวน์โหลด */
         div.stButton > button, [data-testid="stDownloadButton"] > button {
             border: 1px solid #F0B90B !important;
             font-weight: bold !important;
@@ -45,7 +40,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. Sidebar UI (นำตัวเลือก Theme ออก เหลือเฉพาะส่วนอัปโหลดและ Export)
+# 3. Sidebar UI
 # ==========================================
 with st.sidebar:
     st.header("⚙️ แผงควบคุม (Controls)")
@@ -77,10 +72,9 @@ file_names_placeholder = st.empty()
 st.markdown("---")
 
 # ==========================================
-# 5. DAD Parser Logic (แก้ไขแกน X เวลาให้ตรงกับชื่อไฟล์และข้อมูลจริง)
+# 5. DAD Parser Logic (แมป Channel ตรงตามรูปภาพล่าสุด)
 # ==========================================
 def extract_date_from_filename(filename):
-    """ ถอดรหัสวันที่จากชื่อไฟล์ Yokogawa เช่น 032229_260917_203440.DAD -> 2026-09-17 """
     match = re.search(r'_(\d{2})(\d{2})(\d{2})_', filename)
     if match:
         yr, mo, dy = int(match.group(1)), int(match.group(2)), int(match.group(3))
@@ -108,7 +102,7 @@ def find_dad_params(raw, machine_type):
                         return offset, rs, (rs - 8) // 4
     return default_offset, default_rs, (default_rs - 8) // 4
 
-@st.cache_data(show_spinner="⏳ กำลังประมวลผลไฟล์ .DAD (แก้ไขแกน X เวลาถูกต้อง)...")
+@st.cache_data(show_spinner="⏳ กำลังประมวลผลไฟล์ .DAD (แมปปิ้ง Channel เฉพาะเตา)...")
 def parse_dad_to_df(files_data):
     all_records = []
     machine_type = "Unknown"
@@ -131,13 +125,10 @@ def parse_dad_to_df(files_data):
             if len(hdr) < 8: break
             yr, mo, dy, hr, mn, sc = hdr[0], hdr[1], hdr[2], hdr[3], hdr[4], hdr[5]
             
-            # บล็อกวันที่ให้ตรงกับข้อมูลจริง
             if not (0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59):
                 continue
                 
             full_year = (2000 + yr) if yr < 80 else (1900 + yr)
-            
-            # ยืนยันปี/เดือน/วันกับชื่อไฟล์หากมีข้อมูล
             if file_date_hint:
                 hint_yr, hint_mo, hint_dy = file_date_hint
                 if abs(full_year - hint_yr) > 2:
@@ -154,7 +145,7 @@ def parse_dad_to_df(files_data):
                 data_pos = base + 8 + ci*4
                 if data_pos + 4 > len(raw): break
                 
-                # อ่านเฉพาะค่า MAX
+                # อ่านเฉพาะค่า MAX (Column Max)
                 max_v = struct.unpack_from('>h', raw, data_pos + 2)[0]
                 
                 if max_v not in (-32768, -32767, 32767) and (-30000 < max_v < 30000):
@@ -172,24 +163,28 @@ def parse_dad_to_df(files_data):
                 
     df = pd.DataFrame(all_records)
     if not df.empty:
-        # ลบข้อมูลเวลาซ้ำ และจัดเรียงเวลาจากน้อยไปมาก
         df = df.drop_duplicates(subset=["DateTime"]).sort_values("DateTime").reset_index(drop=True)
         
-        # กรองเฉพาะช่วงเวลาที่สมเหตุสมผลสำหรับไฟล์ที่อัปโหลด (ตัดเวลาหลุดขยะออก)
+        # กรองเฉพาะช่วงเวลาที่ถูกต้อง
         median_dt = df["DateTime"].iloc[len(df)//2]
         df = df[abs(df["DateTime"] - median_dt) <= pd.Timedelta(days=10)]
         
-        for i in range(1, 8): df[f"Top Zone #{i}"] = df.get(f"CH{i:03d}")
-        for i in range(1, 8): df[f"Bottom Zone #{i}"] = df.get(f"CH{i+7:03d}")
+        # ==========================================
+        # 🟢 แมปปิ้ง Channel ตามตารางภาพถ่ายชุดใหม่ (NB1 และ NB2)
+        # ==========================================
+        for i in range(1, 8): df[f"Top Zone #{i}"] = df.get(f"CH{i:03d}")        # CH001-CH007 (ทั้ง NB1 และ NB2)
+        for i in range(1, 8): df[f"Bottom Zone #{i}"] = df.get(f"CH{(i+7):03d}")  # CH008-CH014 (ทั้ง NB1 และ NB2)
+        
         df["EXIT O2"] = df.get("CH015")
         df["Dryer #1"] = df.get("CH016")
         df["Dryer #2"] = df.get("CH017")
+        
         if machine_type == "NB1":
-            df["ENTRANCE O2"] = df.get("CH019")
-            df["N2 Flow"] = df.get("CH018")
-            df["DEW POINT"] = df.get("CH020")
+            df["ENTRANCE O2"] = df.get("CH019")  # CH019 สำหรับ NB1
+            df["N2 Flow"] = df.get("CH018")      # CH018 สำหรับ NB1
+            df["DEW POINT"] = df.get("CH020")    # CH020 สำหรับ NB1
         else:
-            df["ENTRANCE O2"] = df.get("CH018")
+            df["ENTRANCE O2"] = df.get("CH018")  # CH018 สำหรับ NB2
             df["N2 Flow"] = None
             df["DEW POINT"] = None
             
@@ -238,20 +233,24 @@ def create_unified_figure(df, machine_type, initial_idx):
     top_colors = ["#FF0000", "#008000", "#0000FF", "#8A2BE2", "#A52A2A", "#FFA500", "#9ACD32"]
     bottom_colors = ["#00FFFF", "#FF1493", "#808080", "#00FF00", "#008000", "#0000FF", "#8A2BE2"]
 
+    # Top Zone (CH001-CH007)
     for i in range(1, 8):
         fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get(f"Top Zone #{i}"), name=f"Top Z#{i} (CH{i:03d})", mode="lines", line=dict(color=top_colors[i-1], width=2), visible=(initial_idx==0)), secondary_y=False)
         traces_info.append(0)
 
+    # Bottom Zone (CH008-CH014)
     for i in range(1, 8):
         ch_num = 7 + i
         fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get(f"Bottom Zone #{i}"), name=f"Bottom Z#{i} (CH{ch_num:03d})", mode="lines", line=dict(color=bottom_colors[i-1], width=2), visible=(initial_idx==1)), secondary_y=False)
         traces_info.append(1)
 
+    # Dryer
     fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("Dryer #1"), name="Dryer #1 (CH016)", mode="lines", line=dict(color="#FFA500", width=2), visible=(initial_idx==2)), secondary_y=False)
     traces_info.append(2)
     fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("Dryer #2"), name="Dryer #2 (CH017)", mode="lines", line=dict(color="#9ACD32", width=2), visible=(initial_idx==2)), secondary_y=False)
     traces_info.append(2)
 
+    # O2 / N2
     ent_ch = "CH019" if machine_type == "NB1" else "CH018"
     fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("ENTRANCE O2"), name=f"ENTRANCE O2 ({ent_ch})", mode="lines", line=dict(color="#FF80FF", width=2), visible=(initial_idx==3)), secondary_y=False)
     traces_info.append(3)
@@ -262,6 +261,7 @@ def create_unified_figure(df, machine_type, initial_idx):
         fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("N2 Flow"), name="N2 Flow (CH018)", mode="lines", line=dict(color="#ADD8E6", width=2), visible=(initial_idx==3)), secondary_y=True)
         traces_info.append(3)
 
+    # Dew Point
     if machine_type == "NB1" and "DEW POINT" in df.columns:
         fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("DEW POINT"), name="Dew Point (CH020)", mode="lines", line=dict(color="#00ecff", width=2), visible=(initial_idx==4)), secondary_y=False)
         traces_info.append(4)
@@ -353,9 +353,8 @@ if uploaded_files:
         
         file_names_placeholder.markdown(f"<span style='font-size:1.1rem;'><b>📁 File(s):</b> {file_names_str}</span>", unsafe_allow_html=True)
         
-        st.success(f"รวมข้อมูลสำเร็จ {len(uploaded_files)} ไฟล์ ({len(df)} แถว) - แสดงผลเฉพาะค่า MAX")
+        st.success(f"รวมข้อมูลสำเร็จ {len(uploaded_files)} ไฟล์ ({len(df)} แถว) - โหมด {detected_machine} (อ่านเฉพาะค่า MAX)")
         
-        # แสดงผลกราฟ
         st.plotly_chart(create_unified_figure(df, detected_machine, 0), use_container_width=True)
         st.plotly_chart(create_unified_figure(df, detected_machine, 1), use_container_width=True)
         st.plotly_chart(create_unified_figure(df, detected_machine, 2), use_container_width=True)
