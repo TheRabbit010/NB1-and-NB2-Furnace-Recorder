@@ -7,138 +7,65 @@ from datetime import datetime
 import io
 
 # ==========================================
-# 1. Page Config & Default Setup
+# 1. Page Config Setup
 # ==========================================
 st.set_page_config(
     page_title="Recorder Furnace YOKOGAWA (.DAD)",
     page_icon="🏭",
     layout="wide",
-    initial_sidebar_state="expanded" # บังคับให้ Sidebar กางออกเสมอ
+    initial_sidebar_state="expanded"
 )
 
 if "dad_uploader_key" not in st.session_state:
     st.session_state["dad_uploader_key"] = 0
 
 # ==========================================
-# 2. CSS Injector (ระบบจัดการ Theme และ UI)
+# 2. CSS Injector (แก้ไข CSS ไม่ให้บัง Sidebar)
 # ==========================================
-
-# ซ่อนแถบเครื่องมือมุมขวาบน เพื่อความสะอาดตา และตั้งค่า Header ให้โปร่งใส
 st.markdown("""
     <style>
-        [data-testid="stHeader"] { background-color: transparent !important; }
-        [data-testid="stToolbar"], #MainMenu, .stAppDeployButton { display: none !important; } 
+        /* ปรับแต่ง Sidebar ให้เห็นชัดเจน ไม่โดนสีพื้นหลังทับ */
+        [data-testid="stSidebar"] {
+            background-color: #161b22 !important;
+            border-right: 1px solid #30363d !important;
+        }
+        [data-testid="stSidebarHeader"] {
+            background-color: #161b22 !important;
+        }
+        
+        /* ปุ่มเปิด-ปิด Sidebar ให้เป็นสีทองเห็นชัดเจน */
+        button[kind="header"], [data-testid="collapsedControl"], [data-testid="stSidebarCollapseButton"] {
+            color: #F0B90B !important;
+            background-color: #21262d !important;
+            border-radius: 4px !important;
+        }
+        button[kind="header"] svg, [data-testid="collapsedControl"] svg, [data-testid="stSidebarCollapseButton"] svg {
+            fill: #F0B90B !important;
+        }
+
+        /* ปุ่มกดและกล่อง Uploader ใน Sidebar */
+        div.stButton > button, [data-testid="stDownloadButton"] > button {
+            background-color: #21262d !important;
+            color: #ffffff !important;
+            border: 1px solid #F0B90B !important;
+            font-weight: bold !important;
+            width: 100%;
+        }
+        div.stButton > button:hover, [data-testid="stDownloadButton"] > button:hover {
+            background-color: #F0B90B !important;
+            color: #000000 !important;
+        }
     </style>
 """, unsafe_allow_html=True)
 
-# โค้ด CSS สำหรับ Dark Mode
-dark_css = """
-<style>
-    html, body, .stApp, [data-testid="stAppViewContainer"] { 
-        background-color: #0e1117 !important; 
-        color: #ffffff !important; 
-    }
-    [data-testid="stSidebar"], [data-testid="stSidebarHeader"] { background-color: #161b22 !important; }
-    .stMarkdown, h1, h2, h3, h4, h5, h6, p, span, label { color: #ffffff !important; }
-    
-    /* เน้นปุ่มลูกศร Sidebar ให้เป็นสีทอง */
-    button[kind="header"], [data-testid="collapsedControl"] { color: #F0B90B !important; }
-    button[kind="header"] svg, [data-testid="collapsedControl"] svg { fill: #F0B90B !important; }
-
-    /* ปุ่มกดทั่วไป และปุ่ม Export */
-    div.stButton > button, [data-testid="stDownloadButton"] > button {
-        background-color: #21262d !important;
-        color: #ffffff !important;
-        border: 1px solid #F0B90B !important;
-        font-weight: bold !important;
-        width: 100%;
-    }
-    div.stButton > button:hover, [data-testid="stDownloadButton"] > button:hover {
-        background-color: #F0B90B !important;
-        color: #000000 !important;
-    }
-    div.stButton > button *, [data-testid="stDownloadButton"] > button * { color: inherit !important; }
-
-    /* กล่อง File Uploader */
-    [data-testid="stFileUploader"] { background-color: #0e1117 !important; border: 1.5px solid #F0B90B !important; border-radius: 8px !important; padding: 10px !important; }
-    [data-testid="stFileUploader"] section { background-color: #1c2128 !important; border: 1px dashed #F0B90B !important; }
-    [data-testid="stFileUploaderFileData"] { background-color: #21262d !important; border: 1px solid #F0B90B !important; }
-    
-    /* แก้ไขปุ่ม Browse files (Upload) ให้เห็นชัดเจนใน Dark mode */
-    [data-testid="stFileUploader"] button {
-        background-color: #21262d !important;
-        color: #ffffff !important;
-        border: 1px solid #F0B90B !important;
-    }
-    [data-testid="stFileUploader"] button:hover {
-        background-color: #F0B90B !important;
-        color: #000000 !important;
-    }
-</style>
-"""
-
-# โค้ด CSS สำหรับ Bright Mode
-bright_css = """
-<style>
-    html, body, .stApp, [data-testid="stAppViewContainer"] { 
-        background-color: #f4f6f9 !important; 
-        color: #1a1a1a !important; 
-    }
-    [data-testid="stSidebar"], [data-testid="stSidebarHeader"] { background-color: #e9ecef !important; }
-    .stMarkdown, h1, h2, h3, h4, h5, h6, p, span, label { color: #1a1a1a !important; }
-    
-    /* เน้นปุ่มลูกศร Sidebar ให้เป็นสีน้ำเงิน */
-    button[kind="header"], [data-testid="collapsedControl"] { color: #0056b3 !important; }
-    button[kind="header"] svg, [data-testid="collapsedControl"] svg { fill: #0056b3 !important; }
-
-    /* ปุ่มกดทั่วไป และปุ่ม Export */
-    div.stButton > button, [data-testid="stDownloadButton"] > button {
-        background-color: #ffffff !important;
-        color: #0056b3 !important;
-        border: 1.5px solid #0056b3 !important;
-        font-weight: bold !important;
-        width: 100%;
-    }
-    div.stButton > button:hover, [data-testid="stDownloadButton"] > button:hover {
-        background-color: #0056b3 !important;
-        color: #ffffff !important;
-    }
-    div.stButton > button *, [data-testid="stDownloadButton"] > button * { color: inherit !important; }
-
-    /* กล่อง File Uploader */
-    [data-testid="stFileUploader"] { background-color: #ffffff !important; border: 1.5px solid #0056b3 !important; border-radius: 8px !important; padding: 10px !important; }
-    [data-testid="stFileUploader"] section { background-color: #f8f9fa !important; border: 1px dashed #0056b3 !important; }
-    [data-testid="stFileUploaderFileData"] { background-color: #e9ecef !important; border: 1px solid #0056b3 !important; }
-    
-    /* แก้ไขปุ่ม Browse files (Upload) ให้เห็นชัดเจนใน Bright mode */
-    [data-testid="stFileUploader"] button {
-        background-color: #ffffff !important;
-        color: #0056b3 !important;
-        border: 1px solid #0056b3 !important;
-    }
-    [data-testid="stFileUploader"] button:hover {
-        background-color: #0056b3 !important;
-        color: #ffffff !important;
-    }
-</style>
-"""
-
-# โค้ด CSS สำหรับ System Mode
-system_css = """
-<style>
-    div.stButton > button, [data-testid="stDownloadButton"] > button { width: 100%; }
-</style>
-"""
-
 # ==========================================
-# 3. Sidebar UI (แผงควบคุมหลักด้านซ้ายกลับมาแล้ว)
+# 3. Sidebar UI (แผงควบคุมหลักฝั่งซ้าย)
 # ==========================================
 with st.sidebar:
     st.header("⚙️ แผงควบคุม (Controls)")
     theme_choice = st.radio("🎨 เลือกโทนสีหน้าจอ (Theme):", ["Dark", "Bright", "System"], index=0, horizontal=True)
     st.markdown("---")
     
-    # กล่องอัปโหลดไฟล์จะอยู่ที่ Sidebar
     uploaded_files = st.file_uploader(
         "📁 อัปโหลดไฟล์ YOKOGAWA (.DAD)", 
         type=["dad", "DAD"],
@@ -151,19 +78,10 @@ with st.sidebar:
         st.session_state["dad_uploader_key"] += 1 
         st.rerun()
 
-    # พื้นที่สำหรับปุ่ม Export ด้านล่าง Sidebar
     export_placeholder = st.container()
 
-# ฉีด CSS ตาม Theme ที่เลือก
-if theme_choice == "Dark":
-    st.markdown(dark_css, unsafe_allow_html=True)
-elif theme_choice == "Bright":
-    st.markdown(bright_css, unsafe_allow_html=True)
-else:
-    st.markdown(system_css, unsafe_allow_html=True)
-
 # ==========================================
-# 4. Main UI (หน้าจอหลักแสดงผลกราฟ)
+# 4. Main UI Header
 # ==========================================
 credit_color = "#8b949e" if theme_choice == "Dark" else "#6c757d" if theme_choice == "Bright" else "gray"
 
@@ -176,7 +94,7 @@ file_names_placeholder = st.empty()
 st.markdown("---")
 
 # ==========================================
-# 5. DAD Parser Logic (อ่านเฉพาะค่า MAX)
+# 5. DAD Parser Logic (แก้ไขการเรียงเวลาและค่า MAX)
 # ==========================================
 def find_dad_params(raw, machine_type):
     default_rs = 84 if machine_type == "NB2" else 88
@@ -198,7 +116,7 @@ def find_dad_params(raw, machine_type):
                         return offset, rs, (rs - 8) // 4
     return default_offset, default_rs, (default_rs - 8) // 4
 
-@st.cache_data(show_spinner="⏳ กำลังประมวลผลไฟล์ .DAD (ดึงเฉพาะค่า MAX)...")
+@st.cache_data(show_spinner="⏳ กำลังประมวลผลไฟล์ .DAD (อ่านเฉพาะค่า MAX)...")
 def parse_dad_to_df(files_data):
     all_records = []
     machine_type = "Unknown"
@@ -231,10 +149,10 @@ def parse_dad_to_df(files_data):
                 data_pos = base + 8 + ci*4
                 if data_pos + 4 > len(raw): break
                 
-                # อ่านค่า max_v (2 Bytes หลังของ 4 Bytes ต่อ Channel)
+                # อ่านเฉพาะค่า MAX (2 Bytes หลังของโครงสร้างข้อมูล Channel)
                 max_v = struct.unpack_from('>h', raw, data_pos + 2)[0]
                 
-                # กรองค่า Out-of-Range Sensor (-32768, 32767) ออก
+                # กรองค่าสัญญาณหลุด/Error (-32768, 32767)
                 if max_v not in (-32768, -32767, 32767) and (-30000 < max_v < 30000):
                     val = max_v / 10.0
                     if -100.0 <= val <= 2000.0:
@@ -250,6 +168,7 @@ def parse_dad_to_df(files_data):
                 
     df = pd.DataFrame(all_records)
     if not df.empty:
+        # **จุดสำคัญแก้กราฟเพี้ยน:** ลบเวลาซ้ำ และจัดเรียงจากอดีตไปปัจจุบันอย่างเป็นลำดับ
         df = df.drop_duplicates(subset=["DateTime"]).sort_values("DateTime").reset_index(drop=True)
         
         for i in range(1, 8): df[f"Top Zone #{i}"] = df.get(f"CH{i:03d}")
@@ -274,24 +193,11 @@ def parse_dad_to_df(files_data):
 # 6. ฟังก์ชันสร้างกราฟ
 # ==========================================
 def apply_industrial_style(fig, y_title, theme_mode, is_dual_axis=False):
-    if theme_mode == "Dark":
-        t_bg = "#161b22"
-        t_paper = "#0e1117"
-        t_font = "#ffffff"
-        t_grid = "rgba(255,255,255,0.08)"
-        t_line = "#555555"
-    elif theme_mode == "Bright":
-        t_bg = "#ffffff"
-        t_paper = "#f4f6f9"
-        t_font = "#1a1a1a"
-        t_grid = "rgba(0,0,0,0.1)"
-        t_line = "#cccccc"
-    else: 
-        t_bg = "rgba(0,0,0,0)"
-        t_paper = "rgba(0,0,0,0)"
-        t_font = "gray"
-        t_grid = "rgba(128,128,128,0.2)"
-        t_line = "gray"
+    t_bg = "#161b22" if theme_mode == "Dark" else "#ffffff" if theme_mode == "Bright" else "rgba(0,0,0,0)"
+    t_paper = "#0e1117" if theme_mode == "Dark" else "#f4f6f9" if theme_mode == "Bright" else "rgba(0,0,0,0)"
+    t_font = "#ffffff" if theme_mode == "Dark" else "#1a1a1a" if theme_mode == "Bright" else "gray"
+    t_grid = "rgba(255,255,255,0.08)" if theme_mode == "Dark" else "rgba(0,0,0,0.1)"
+    t_line = "#555555" if theme_mode == "Dark" else "#cccccc"
 
     layout_args = dict(
         plot_bgcolor=t_bg,
@@ -376,18 +282,9 @@ def create_unified_figure(df, machine_type, initial_idx, theme_mode):
     if machine_type == "NB1":
         buttons.append(dict(label="5. Dew Point", method="update", args=[{"visible": [t == 4 for t in traces_info]}, {"title.text": "<b>5. Dew point 'Cdp (CH020)</b>", "yaxis.title.text": "Dew Point (°Cdp)", "yaxis.range": [-100, 10], "yaxis2.visible": False}]))
 
-    if theme_mode == "Dark":
-        btn_bg = "rgba(22, 27, 34, 0.8)"
-        btn_font = "#FFFFFF"
-        btn_border = "rgba(240, 185, 11, 0.5)"
-    elif theme_mode == "Bright":
-        btn_bg = "rgba(255, 255, 255, 0.9)"
-        btn_font = "#0056b3"
-        btn_border = "rgba(0, 86, 179, 0.5)"
-    else:
-        btn_bg = "rgba(128, 128, 128, 0.2)"
-        btn_font = "gray"
-        btn_border = "rgba(128, 128, 128, 0.5)"
+    btn_bg = "rgba(22, 27, 34, 0.8)" if theme_mode == "Dark" else "rgba(255, 255, 255, 0.9)" if theme_mode == "Bright" else "rgba(128, 128, 128, 0.2)"
+    btn_font = "#FFFFFF" if theme_mode == "Dark" else "#0056b3" if theme_mode == "Bright" else "gray"
+    btn_border = "rgba(240, 185, 11, 0.5)" if theme_mode == "Dark" else "rgba(0, 86, 179, 0.5)" if theme_mode == "Bright" else "rgba(128, 128, 128, 0.5)"
 
     title_font_color = apply_industrial_style(fig, "Temperature (°C)", theme_mode, is_dual_axis=True)
     
@@ -466,9 +363,8 @@ if uploaded_files:
         subtext_color = "#a0aab2" if theme_choice == "Dark" else "#666666" if theme_choice == "Bright" else "gray"
         file_names_placeholder.markdown(f"<span style='color:{subtext_color}; font-size:1.1rem;'><b>📁 File(s):</b> {file_names_str}</span>", unsafe_allow_html=True)
         
-        st.success(f"รวมข้อมูลสำเร็จ {len(uploaded_files)} ไฟล์ ({len(df)} แถว) - อ่านเฉพาะค่า MAX")
+        st.success(f"รวมข้อมูลสำเร็จ {len(uploaded_files)} ไฟล์ ({len(df)} แถว) - แสดงผลเฉพาะค่า MAX")
         
-        # แสดงผลกราฟ
         st.plotly_chart(create_unified_figure(df, detected_machine, 0, theme_choice), use_container_width=True)
         st.plotly_chart(create_unified_figure(df, detected_machine, 1, theme_choice), use_container_width=True)
         st.plotly_chart(create_unified_figure(df, detected_machine, 2, theme_choice), use_container_width=True)
@@ -477,9 +373,6 @@ if uploaded_files:
         if detected_machine == "NB1":
             st.plotly_chart(create_unified_figure(df, detected_machine, 4, theme_choice), use_container_width=True)
 
-        # ==========================================
-        # 8. ส่วนดาวน์โหลดข้อมูล (แสดงใน Sidebar)
-        # ==========================================
         with export_placeholder:
             st.markdown("---")
             st.subheader("💾 ส่งออกข้อมูล (Export Data)")
@@ -509,4 +402,4 @@ if uploaded_files:
         st.error(f"❌ เกิดข้อผิดพลาดในการประมวลผลไฟล์: {e}")
 
 else:
-    st.info("👈 กรุณาเปิดแถบควบคุมด้านซ้ายมือ (Sidebar) เพื่ออัปโหลดไฟล์ .DAD (สามารถอัปโหลดพร้อมกันได้หลายไฟล์)")
+    st.info("👈 กรุณาเปิดแถบควบคุมด้านซ้ายมือ (Sidebar) เพื่ออัปโหลดไฟล์ .DAD")
