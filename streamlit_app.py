@@ -14,18 +14,17 @@ st.set_page_config(
     page_title="Recorder Furnace YOKOGAWA (.DAD)",
     page_icon="🏭",
     layout="wide",
-    initial_sidebar_state="expanded" # บังคับกาง Sidebar เสมอ
+    initial_sidebar_state="expanded"
 )
 
 if "dad_uploader_key" not in st.session_state:
     st.session_state["dad_uploader_key"] = 0
 
 # ==========================================
-# 2. CSS Injector (แก้ไข CSS ให้ Sidebar แสดงผลชัดเจน)
+# 2. CSS Injector (ระบบจัดการ UI & Theme)
 # ==========================================
 st.markdown("""
     <style>
-        /* ซ่อนเฉพาะปุ่ม Deploy/MainMenu แต่ยังคงแสดง Header สำหรับปุ่มเปิด-ปิด Sidebar */
         [data-testid="stAppDeployButton"], #MainMenu { 
             display: none !important; 
         }
@@ -33,8 +32,6 @@ st.markdown("""
             background-color: transparent !important; 
             z-index: 1000001 !important;
         }
-
-        /* ปุ่มเปิด-ปิด Sidebar (ลูกศรมุมซ้ายบน) เด่นชัดเป็นสีทอง */
         [data-testid="collapsedControl"], button[kind="header"] {
             background-color: #21262d !important;
             color: #F0B90B !important;
@@ -47,8 +44,6 @@ st.markdown("""
         [data-testid="collapsedControl"] svg, button[kind="header"] svg {
             fill: #F0B90B !important;
         }
-
-        /* ปรับแต่งตัว Sidebar ให้มีสีพื้นหลังชัดเจน และมีเส้นขอบทองแยกฝั่ง */
         section[data-testid="stSidebar"] {
             background-color: #161b22 !important;
             border-right: 2px solid #F0B90B !important;
@@ -183,7 +178,7 @@ file_names_placeholder = st.empty()
 st.markdown("---")
 
 # ==========================================
-# 5. DAD Parser Logic (อ่านเฉพาะค่า MAX)
+# 5. DAD Parser Logic (ถอดรหัสอ่านเฉพาะค่า MAX ของ NB1 และ NB2)
 # ==========================================
 def extract_date_from_filename(filename):
     match = re.search(r'_(\d{2})(\d{2})(\d{2})_', filename)
@@ -195,7 +190,7 @@ def extract_date_from_filename(filename):
     return None
 
 def find_dad_params(raw, machine_type):
-    default_rs = 84 if machine_type == "NB2" else 88
+    default_rs = 88 if machine_type == "NB1" else 84
     default_offset = 15008
     if default_offset + default_rs * 2 < len(raw):
         yr, mo, dy, hr, mn, sc = raw[default_offset:default_offset+6]
@@ -206,7 +201,7 @@ def find_dad_params(raw, machine_type):
     for offset in range(14000, max_search):
         yr, mo, dy, hr, mn, sc = raw[offset], raw[offset+1], raw[offset+2], raw[offset+3], raw[offset+4], raw[offset+5]
         if 0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59:
-            for rs in [84, 88, 92, 80, 96]:
+            for rs in [88, 84, 92, 80, 96]:
                 if offset + rs + 5 < len(raw):
                     yr2, mo2, dy2 = raw[offset+rs], raw[offset+rs+1], raw[offset+rs+2]
                     if 0 <= yr2 <= 99 and 1 <= mo2 <= 12 and 1 <= dy2 <= 31:
@@ -219,6 +214,7 @@ def parse_dad_to_df(files_data):
     machine_type = "Unknown"
     
     for fname, raw in files_data:
+        # แยกชนิดเตาอัตโนมัติจากชื่อไฟล์
         if "_DATA" in fname.upper():
             machine_type = "NB2"
         else:
@@ -232,7 +228,7 @@ def parse_dad_to_df(files_data):
         
         for i in range(total):
             base = offset + i * record_size
-            hdr = raw[base:base+8]
+            hdr = raw[base:base+8] # Time Header 8 ไบต์ถูกต้อง
             if len(hdr) < 8: break
             yr, mo, dy, hr, mn, sc = hdr[0], hdr[1], hdr[2], hdr[3], hdr[4], hdr[5]
             
@@ -256,7 +252,7 @@ def parse_dad_to_df(files_data):
                 data_pos = base + 8 + ci*4
                 if data_pos + 4 > len(raw): break
                 
-                # บังคับอ่านเฉพาะค่า MAX (2 ไบต์หลังของแต่ละ Channel)
+                # 🎯 บังคับอ่านเฉพาะค่า MAX (2 ไบต์หลังของแต่ละ Channel)
                 max_v = struct.unpack_from('>h', raw, data_pos + 2)[0]
                 
                 if max_v not in (-32768, -32767, 32767) and (-30000 < max_v < 30000):
@@ -274,12 +270,13 @@ def parse_dad_to_df(files_data):
                 
     df = pd.DataFrame(all_records)
     if not df.empty:
+        # ลบข้อมูลซ้ำ และเรียงลำดับเวลาอย่างถูกต้อง
         df = df.drop_duplicates(subset=["DateTime"]).sort_values("DateTime").reset_index(drop=True)
         
         median_dt = df["DateTime"].iloc[len(df)//2]
         df = df[abs(df["DateTime"] - median_dt) <= pd.Timedelta(days=10)]
         
-        # Map Channel ตามสเปก
+        # 🟢 Map Channel ตามสเปกรูปภาพของ NB1 และ NB2
         for i in range(1, 8): df[f"Top Zone #{i}"] = df.get(f"CH{i:03d}")        # CH001-CH007
         for i in range(1, 8): df[f"Bottom Zone #{i}"] = df.get(f"CH{(i+7):03d}")  # CH008-CH014
         
@@ -288,11 +285,11 @@ def parse_dad_to_df(files_data):
         df["Dryer #2"] = df.get("CH017")
         
         if machine_type == "NB1":
-            df["ENTRANCE O2"] = df.get("CH019")
-            df["N2 Flow"] = df.get("CH018")
-            df["DEW POINT"] = df.get("CH020")
+            df["ENTRANCE O2"] = df.get("CH019")  # NB1: ENTRANCE O2 คือ CH019
+            df["N2 Flow"] = df.get("CH018")      # NB1: N2 Flow คือ CH018
+            df["DEW POINT"] = df.get("CH020")    # NB1: Dew Point คือ CH020
         else:
-            df["ENTRANCE O2"] = df.get("CH018")
+            df["ENTRANCE O2"] = df.get("CH018")  # NB2: ENTRANCE O2 คือ CH018
             df["N2 Flow"] = None
             df["DEW POINT"] = None
             
