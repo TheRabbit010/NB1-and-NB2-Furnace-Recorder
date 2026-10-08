@@ -13,18 +13,15 @@ st.set_page_config(
     page_title="Recorder Furnace YOKOGAWA (.DAD)",
     page_icon="🏭",
     layout="wide",
-    initial_sidebar_state="expanded" # บังคับให้ Sidebar กางออกเสมอ
+    initial_sidebar_state="expanded"
 )
 
-# สร้าง Session State สำหรับเก็บคีย์ของ File Uploader
 if "dad_uploader_key" not in st.session_state:
     st.session_state["dad_uploader_key"] = 0
 
 # ==========================================
 # 2. CSS Injector (ระบบจัดการ Theme และ UI)
 # ==========================================
-
-# ซ่อนแถบเครื่องมือมุมขวาบน เพื่อความสะอาดตา และตั้งค่า Header ให้โปร่งใส
 st.markdown("""
     <style>
         [data-testid="stHeader"] { background-color: transparent !important; }
@@ -32,7 +29,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# โค้ด CSS สำหรับ Dark Mode
 dark_css = """
 <style>
     html, body, .stApp, [data-testid="stAppViewContainer"] { 
@@ -42,11 +38,9 @@ dark_css = """
     [data-testid="stSidebar"], [data-testid="stSidebarHeader"] { background-color: #161b22 !important; }
     .stMarkdown, h1, h2, h3, h4, h5, h6, p, span, label { color: #ffffff !important; }
     
-    /* เน้นปุ่มลูกศร Sidebar ให้เป็นสีทอง */
     button[kind="header"], [data-testid="collapsedControl"] { color: #F0B90B !important; }
     button[kind="header"] svg, [data-testid="collapsedControl"] svg { fill: #F0B90B !important; }
 
-    /* ปุ่มกดทั่วไป และปุ่ม Export */
     div.stButton > button, [data-testid="stDownloadButton"] > button {
         background-color: #21262d !important;
         color: #ffffff !important;
@@ -60,12 +54,10 @@ dark_css = """
     }
     div.stButton > button *, [data-testid="stDownloadButton"] > button * { color: inherit !important; }
 
-    /* กล่อง File Uploader */
     [data-testid="stFileUploader"] { background-color: #0e1117 !important; border: 1.5px solid #F0B90B !important; border-radius: 8px !important; padding: 10px !important; }
     [data-testid="stFileUploader"] section { background-color: #1c2128 !important; border: 1px dashed #F0B90B !important; }
     [data-testid="stFileUploaderFileData"] { background-color: #21262d !important; border: 1px solid #F0B90B !important; }
     
-    /* แก้ไขปุ่ม Browse files (Upload) ให้เห็นชัดเจนใน Dark mode */
     [data-testid="stFileUploader"] button {
         background-color: #21262d !important;
         color: #ffffff !important;
@@ -78,7 +70,6 @@ dark_css = """
 </style>
 """
 
-# โค้ด CSS สำหรับ Bright Mode
 bright_css = """
 <style>
     html, body, .stApp, [data-testid="stAppViewContainer"] { 
@@ -88,11 +79,9 @@ bright_css = """
     [data-testid="stSidebar"], [data-testid="stSidebarHeader"] { background-color: #e9ecef !important; }
     .stMarkdown, h1, h2, h3, h4, h5, h6, p, span, label { color: #1a1a1a !important; }
     
-    /* เน้นปุ่มลูกศร Sidebar ให้เป็นสีน้ำเงิน */
     button[kind="header"], [data-testid="collapsedControl"] { color: #0056b3 !important; }
     button[kind="header"] svg, [data-testid="collapsedControl"] svg { fill: #0056b3 !important; }
 
-    /* ปุ่มกดทั่วไป และปุ่ม Export */
     div.stButton > button, [data-testid="stDownloadButton"] > button {
         background-color: #ffffff !important;
         color: #0056b3 !important;
@@ -106,12 +95,10 @@ bright_css = """
     }
     div.stButton > button *, [data-testid="stDownloadButton"] > button * { color: inherit !important; }
 
-    /* กล่อง File Uploader */
     [data-testid="stFileUploader"] { background-color: #ffffff !important; border: 1.5px solid #0056b3 !important; border-radius: 8px !important; padding: 10px !important; }
     [data-testid="stFileUploader"] section { background-color: #f8f9fa !important; border: 1px dashed #0056b3 !important; }
     [data-testid="stFileUploaderFileData"] { background-color: #e9ecef !important; border: 1px solid #0056b3 !important; }
     
-    /* แก้ไขปุ่ม Browse files (Upload) ให้เห็นชัดเจนใน Bright mode */
     [data-testid="stFileUploader"] button {
         background-color: #ffffff !important;
         color: #0056b3 !important;
@@ -124,7 +111,6 @@ bright_css = """
 </style>
 """
 
-# โค้ด CSS สำหรับ System Mode
 system_css = """
 <style>
     div.stButton > button, [data-testid="stDownloadButton"] > button { width: 100%; }
@@ -132,14 +118,13 @@ system_css = """
 """
 
 # ==========================================
-# 3. Sidebar UI (แผงควบคุมหลักด้านซ้าย)
+# 3. Sidebar UI
 # ==========================================
 with st.sidebar:
     st.header("⚙️ แผงควบคุม (Controls)")
     theme_choice = st.radio("🎨 เลือกโทนสีหน้าจอ (Theme):", ["Dark", "Bright", "System"], index=0, horizontal=True)
     st.markdown("---")
     
-    # กล่องอัปโหลดไฟล์จะอยู่ที่ Sidebar เสมอ
     uploaded_files = st.file_uploader(
         "📁 อัปโหลดไฟล์ YOKOGAWA (.DAD)", 
         type=["dad", "DAD"],
@@ -152,10 +137,8 @@ with st.sidebar:
         st.session_state["dad_uploader_key"] += 1 
         st.rerun()
 
-    # สร้างพื้นที่ว่างไว้สำหรับใส่ปุ่ม Export ด้านล่างปุ่มเคลียร์
     export_placeholder = st.container()
 
-# ฉีด (Inject) CSS ลงไปในระบบตาม Theme ที่ผู้ใช้กดเลือก
 if theme_choice == "Dark":
     st.markdown(dark_css, unsafe_allow_html=True)
 elif theme_choice == "Bright":
@@ -164,22 +147,20 @@ else:
     st.markdown(system_css, unsafe_allow_html=True)
 
 # ==========================================
-# 4. Main UI (หน้าจอหลักแสดงผลกราฟ)
+# 4. Main UI
 # ==========================================
-# กำหนดสีตัวหนังสือสำหรับเครดิตตาม Theme
 credit_color = "#8b949e" if theme_choice == "Dark" else "#6c757d" if theme_choice == "Bright" else "gray"
 
 title_placeholder = st.empty()
 title_placeholder.title("🏭 Recorder NB1 and NB2 Furnace from YOKOGAWA (.DAD Data)")
 
-# แสดงเครดิตด้านล่างชื่อเรื่อง
 st.markdown(f"<p style='color: {credit_color}; font-size: 0.88rem; margin-top: -15px; margin-bottom: 15px;'><i>Wichien Laithanakit - Brazing Engineer - VSTS / Power Chonburi</i></p>", unsafe_allow_html=True)
 
 file_names_placeholder = st.empty() 
 st.markdown("---")
 
 # ==========================================
-# 5. DAD Parser Logic 
+# 5. DAD Parser Logic (ปรับแก้จุดดึงค่าเพี้ยน)
 # ==========================================
 def find_dad_params(raw, machine_type):
     default_rs = 84 if machine_type == "NB2" else 88
@@ -221,7 +202,6 @@ def parse_dad_to_df(files_data):
             if len(hdr) < 8: break
             yr, mo, dy, hr, mn, sc = hdr[0], hdr[1], hdr[2], hdr[3], hdr[4], hdr[5]
             
-            # บล็อกวันที่เบื้องต้น (รองรับปี 2020-2050)
             if not (20 <= yr <= 50 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59):
                 continue
             try:
@@ -236,8 +216,11 @@ def parse_dad_to_df(files_data):
                 if data_pos + 4 > len(raw): break
                 min_v = struct.unpack_from('>h', raw, data_pos)[0]
                 max_v = struct.unpack_from('>h', raw, data_pos + 2)[0]
-                if min_v not in (-32768, -32767, 32767) and max_v not in (-32768, -32767, 32767):
-                    val = max_v / 10.0
+                
+                # ตรวจสอบการตัด Out-of-Range Sensor Data (-32768, 32767 ฯลฯ)
+                if (-32000 < min_v < 32000) and (-32000 < max_v < 32000):
+                    # ใช้ค่าเฉลี่ย (Mean) ของช่วงเวลาแทน max_v เพื่อป้องกันกราฟกระโดดเพี้ยน
+                    val = (min_v + max_v) / 20.0
                     if -100.0 <= val <= 2000.0:
                         rec[f'CH{(ci+1):03d}'] = val
                         valid_data = True
@@ -251,18 +234,13 @@ def parse_dad_to_df(files_data):
     df = pd.DataFrame(all_records)
     if not df.empty:
         # ==========================================
-        # 🟢 ตัวกรองวันที่ 2 ชั้น (แก้ปัญหากราฟไม่แสดง/ปี 2047)
+        # 🟢 การเรียงลำดับเวลาอย่างถูกต้อง
         # ==========================================
-        # ชั้นที่ 1: หาค่ากลาง (Median) เพื่อดูว่าข้อมูลส่วนใหญ่อยู่ช่วงเวลาไหน และตัดขยะทิ้ง
-        median_date = df["DateTime"].quantile(0.5)
-        df_clean = df[abs(df["DateTime"] - median_date) < pd.Timedelta(days=7)]
+        df = df.drop_duplicates(subset=["DateTime"]).sort_values("DateTime").reset_index(drop=True)
         
-        # ชั้นที่ 2: หาค่า Max Date จากกลุ่มข้อมูลที่ถูกต้องแล้ว เพื่อเอาเฉพาะรอบล่าสุด
-        if not df_clean.empty:
-            max_date = df_clean["DateTime"].max()
-            df = df_clean[abs(df_clean["DateTime"] - max_date) < pd.Timedelta(days=1)]
-        else:
-            df = df_clean
+        # กรองข้อมูลปีขยะที่อยู่นอกช่วงสมเหตุสมผลออก (ยึดตามชุดข้อมูลส่วนใหญ่)
+        max_dt = df["DateTime"].max()
+        df = df[df["DateTime"] >= (max_dt - pd.Timedelta(days=3))]
             
         for i in range(1, 8): df[f"Top Zone #{i}"] = df.get(f"CH{i:03d}")
         for i in range(1, 8): df[f"Bottom Zone #{i}"] = df.get(f"CH{i+7:03d}")
@@ -278,12 +256,12 @@ def parse_dad_to_df(files_data):
             df["N2 Flow"] = None
             df["DEW POINT"] = None
             
-        df = df.drop_duplicates(subset=["DateTime"]).sort_values("DateTime").reset_index(drop=True)
+        df = df.sort_values("DateTime").reset_index(drop=True)
         
     return df, machine_type
 
 # ==========================================
-# 6. ฟังก์ชันสร้างกราฟอัจฉริยะแบบปรับสีตาม Theme
+# 6. ฟังก์ชันสร้างกราฟ
 # ==========================================
 def apply_industrial_style(fig, y_title, theme_mode, is_dual_axis=False):
     if theme_mode == "Dark":
@@ -478,9 +456,8 @@ if uploaded_files:
         subtext_color = "#a0aab2" if theme_choice == "Dark" else "#666666" if theme_choice == "Bright" else "gray"
         file_names_placeholder.markdown(f"<span style='color:{subtext_color}; font-size:1.1rem;'><b>📁 File(s):</b> {file_names_str}</span>", unsafe_allow_html=True)
         
-        st.success(f"รวมข้อมูลสำเร็จ {len(uploaded_files)} ไฟล์ ({len(df)} แถว) - แสดงผลโดยใช้ค่า MAX")
+        st.success(f"รวมข้อมูลสำเร็จ {len(uploaded_files)} ไฟล์ ({len(df)} แถว) - แสดงผลแบบ Average (Mean Value)")
         
-        # สร้างกราฟ
         st.plotly_chart(create_unified_figure(df, detected_machine, 0, theme_choice), use_container_width=True)
         st.plotly_chart(create_unified_figure(df, detected_machine, 1, theme_choice), use_container_width=True)
         st.plotly_chart(create_unified_figure(df, detected_machine, 2, theme_choice), use_container_width=True)
@@ -489,9 +466,6 @@ if uploaded_files:
         if detected_machine == "NB1":
             st.plotly_chart(create_unified_figure(df, detected_machine, 4, theme_choice), use_container_width=True)
 
-        # ==========================================
-        # 8. ส่วนดาวน์โหลดข้อมูล (แสดงใน Sidebar)
-        # ==========================================
         with export_placeholder:
             st.markdown("---")
             st.subheader("💾 ส่งออกข้อมูล (Export Data)")
