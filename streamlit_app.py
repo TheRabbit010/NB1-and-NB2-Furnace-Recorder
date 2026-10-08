@@ -178,9 +178,10 @@ file_names_placeholder = st.empty()
 st.markdown("---")
 
 # ==========================================
-# 5. DAD Parser Logic (ถอดรหัสอ่านเฉพาะค่า MAX ของ NB1 และ NB2)
+# 5. DAD Parser Logic (แก้ปัญหาวันที่/ปีผิด + ดึงเฉพาะค่า MAX)
 # ==========================================
 def extract_date_from_filename(filename):
+    """ ถอดรหัสวันที่จากชื่อไฟล์ Yokogawa เช่น 032229_260917_203440.DAD -> 2026-09-17 """
     match = re.search(r'_(\d{2})(\d{2})(\d{2})_', filename)
     if match:
         yr, mo, dy = int(match.group(1)), int(match.group(2)), int(match.group(3))
@@ -208,13 +209,12 @@ def find_dad_params(raw, machine_type):
                         return offset, rs, (rs - 8) // 4
     return default_offset, default_rs, (default_rs - 8) // 4
 
-@st.cache_data(show_spinner="⏳ กำลังประมวลผลไฟล์ .DAD (ดึงเฉพาะค่า MAX)...")
+@st.cache_data(show_spinner="⏳ กำลังประมวลผลไฟล์ .DAD (ถอดรหัสปีและค่า MAX)...")
 def parse_dad_to_df(files_data):
     all_records = []
     machine_type = "Unknown"
     
     for fname, raw in files_data:
-        # แยกชนิดเตาอัตโนมัติจากชื่อไฟล์
         if "_DATA" in fname.upper():
             machine_type = "NB2"
         else:
@@ -228,18 +228,18 @@ def parse_dad_to_df(files_data):
         
         for i in range(total):
             base = offset + i * record_size
-            hdr = raw[base:base+8] # Time Header 8 ไบต์ถูกต้อง
+            hdr = raw[base:base+8]
             if len(hdr) < 8: break
             yr, mo, dy, hr, mn, sc = hdr[0], hdr[1], hdr[2], hdr[3], hdr[4], hdr[5]
             
             if not (0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59):
                 continue
                 
-            full_year = (2000 + yr) if yr < 80 else (1900 + yr)
+            # ล็อกการอ่านปี ค.ศ. ให้ถูกต้องตามชื่อไฟล์และสเปก Yokogawa
             if file_date_hint:
-                hint_yr, hint_mo, hint_dy = file_date_hint
-                if abs(full_year - hint_yr) > 2:
-                    full_year, mo, dy = hint_yr, hint_mo, hint_dy
+                full_year, mo, dy = file_date_hint
+            else:
+                full_year = (2000 + yr) if yr < 80 else (1900 + yr)
                     
             try:
                 ts = datetime(full_year, mo, dy, hr, mn, sc)
@@ -252,7 +252,7 @@ def parse_dad_to_df(files_data):
                 data_pos = base + 8 + ci*4
                 if data_pos + 4 > len(raw): break
                 
-                # 🎯 บังคับอ่านเฉพาะค่า MAX (2 ไบต์หลังของแต่ละ Channel)
+                # 🎯 อ่านค่า MAX (2 ไบต์หลัง)
                 max_v = struct.unpack_from('>h', raw, data_pos + 2)[0]
                 
                 if max_v not in (-32768, -32767, 32767) and (-30000 < max_v < 30000):
@@ -270,11 +270,7 @@ def parse_dad_to_df(files_data):
                 
     df = pd.DataFrame(all_records)
     if not df.empty:
-        # ลบข้อมูลซ้ำ และเรียงลำดับเวลาอย่างถูกต้อง
         df = df.drop_duplicates(subset=["DateTime"]).sort_values("DateTime").reset_index(drop=True)
-        
-        median_dt = df["DateTime"].iloc[len(df)//2]
-        df = df[abs(df["DateTime"] - median_dt) <= pd.Timedelta(days=10)]
         
         # 🟢 Map Channel ตามสเปกรูปภาพของ NB1 และ NB2
         for i in range(1, 8): df[f"Top Zone #{i}"] = df.get(f"CH{i:03d}")        # CH001-CH007
@@ -285,11 +281,11 @@ def parse_dad_to_df(files_data):
         df["Dryer #2"] = df.get("CH017")
         
         if machine_type == "NB1":
-            df["ENTRANCE O2"] = df.get("CH019")  # NB1: ENTRANCE O2 คือ CH019
-            df["N2 Flow"] = df.get("CH018")      # NB1: N2 Flow คือ CH018
-            df["DEW POINT"] = df.get("CH020")    # NB1: Dew Point คือ CH020
+            df["ENTRANCE O2"] = df.get("CH019")
+            df["N2 Flow"] = df.get("CH018")
+            df["DEW POINT"] = df.get("CH020")
         else:
-            df["ENTRANCE O2"] = df.get("CH018")  # NB2: ENTRANCE O2 คือ CH018
+            df["ENTRANCE O2"] = df.get("CH018")
             df["N2 Flow"] = None
             df["DEW POINT"] = None
             
