@@ -8,25 +8,55 @@ import io
 import re
 
 # ==========================================
-# 1. Page Config & Default Setup
+# 1. Page Config Setup
 # ==========================================
 st.set_page_config(
     page_title="Recorder Furnace YOKOGAWA (.DAD)",
     page_icon="🏭",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded" # บังคับกาง Sidebar เสมอ
 )
 
 if "dad_uploader_key" not in st.session_state:
     st.session_state["dad_uploader_key"] = 0
 
 # ==========================================
-# 2. CSS Injector (ระบบจัดการ UI & Theme)
+# 2. CSS Injector (แก้ไขให้ Sidebar และปุ่มเปิดลูกศรเด่นชัด)
 # ==========================================
 st.markdown("""
     <style>
-        [data-testid="stHeader"] { background-color: transparent !important; }
-        [data-testid="stToolbar"], #MainMenu, .stAppDeployButton { display: none !important; } 
+        /* ซ่อนเฉพาะปุ่ม Deploy/MainMenu แต่ยังคงแสดง Header สำหรับปุ่มเปิด-ปิด Sidebar */
+        [data-testid="stAppDeployButton"], #MainMenu { 
+            display: none !important; 
+        }
+        [data-testid="stHeader"] { 
+            background-color: transparent !important; 
+            z-index: 1000001 !important;
+        }
+
+        /* ปุ่มเปิด-ปิด Sidebar (ลูกศรมุมซ้ายบน) เด่นชัดเป็นสีทอง */
+        [data-testid="collapsedControl"], button[kind="header"] {
+            background-color: #21262d !important;
+            color: #F0B90B !important;
+            border: 1.5px solid #F0B90B !important;
+            border-radius: 6px !important;
+            margin: 10px !important;
+            z-index: 1000002 !important;
+            display: flex !important;
+        }
+        [data-testid="collapsedControl"] svg, button[kind="header"] svg {
+            fill: #F0B90B !important;
+        }
+
+        /* ปรับแต่งตัว Sidebar ให้มีสีพื้นหลังชัดเจน และมีเส้นขอบทองแยกฝั่ง */
+        section[data-testid="stSidebar"] {
+            background-color: #161b22 !important;
+            border-right: 2px solid #F0B90B !important;
+            z-index: 1000000 !important;
+        }
+        [data-testid="stSidebarHeader"] {
+            background-color: #161b22 !important;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -36,11 +66,7 @@ dark_css = """
         background-color: #0e1117 !important; 
         color: #ffffff !important; 
     }
-    [data-testid="stSidebar"], [data-testid="stSidebarHeader"] { background-color: #161b22 !important; }
     .stMarkdown, h1, h2, h3, h4, h5, h6, p, span, label { color: #ffffff !important; }
-    
-    button[kind="header"], [data-testid="collapsedControl"] { color: #F0B90B !important; }
-    button[kind="header"] svg, [data-testid="collapsedControl"] svg { fill: #F0B90B !important; }
 
     div.stButton > button, [data-testid="stDownloadButton"] > button {
         background-color: #21262d !important;
@@ -77,11 +103,7 @@ bright_css = """
         background-color: #f4f6f9 !important; 
         color: #1a1a1a !important; 
     }
-    [data-testid="stSidebar"], [data-testid="stSidebarHeader"] { background-color: #e9ecef !important; }
     .stMarkdown, h1, h2, h3, h4, h5, h6, p, span, label { color: #1a1a1a !important; }
-    
-    button[kind="header"], [data-testid="collapsedControl"] { color: #0056b3 !important; }
-    button[kind="header"] svg, [data-testid="collapsedControl"] svg { fill: #0056b3 !important; }
 
     div.stButton > button, [data-testid="stDownloadButton"] > button {
         background-color: #ffffff !important;
@@ -161,7 +183,7 @@ file_names_placeholder = st.empty()
 st.markdown("---")
 
 # ==========================================
-# 5. DAD Parser Logic (อ่านค่า MAX + ตรวจสอบ NB1/NB2)
+# 5. DAD Parser Logic (อ่านเฉพาะค่า MAX)
 # ==========================================
 def extract_date_from_filename(filename):
     match = re.search(r'_(\d{2})(\d{2})(\d{2})_', filename)
@@ -197,7 +219,6 @@ def parse_dad_to_df(files_data):
     machine_type = "Unknown"
     
     for fname, raw in files_data:
-        # แยกเตาอัตโนมัติจากชื่อไฟล์
         if "_DATA" in fname.upper():
             machine_type = "NB2"
         else:
@@ -210,7 +231,7 @@ def parse_dad_to_df(files_data):
         total = body_len // record_size
         
         for i in range(total):
-            base = offset + i * record_size
+base = offset + i * record_size
             hdr = raw[base:base+8]
             if len(hdr) < 8: break
             yr, mo, dy, hr, mn, sc = hdr[0], hdr[1], hdr[2], hdr[3], hdr[4], hdr[5]
@@ -235,10 +256,9 @@ def parse_dad_to_df(files_data):
                 data_pos = base + 8 + ci*4
                 if data_pos + 4 > len(raw): break
                 
-                # อ่านค่า MAX (2 ไบต์หลังของ 4 ไบต์)
+                # บังคับอ่านเฉพาะค่า MAX (2 ไบต์หลังของแต่ละ Channel)
                 max_v = struct.unpack_from('>h', raw, data_pos + 2)[0]
                 
-                # กรองค่า Error / Sensor Out of range
                 if max_v not in (-32768, -32767, 32767) and (-30000 < max_v < 30000):
                     val = max_v / 10.0
                     if -100.0 <= val <= 2000.0:
@@ -256,11 +276,10 @@ def parse_dad_to_df(files_data):
     if not df.empty:
         df = df.drop_duplicates(subset=["DateTime"]).sort_values("DateTime").reset_index(drop=True)
         
-        # กรองเฉพาะช่วงเวลาหลัก
         median_dt = df["DateTime"].iloc[len(df)//2]
         df = df[abs(df["DateTime"] - median_dt) <= pd.Timedelta(days=10)]
         
-        # Map Channel ตรงตามสเปกของรูปภาพ
+        # Map Channel ตามสเปก
         for i in range(1, 8): df[f"Top Zone #{i}"] = df.get(f"CH{i:03d}")        # CH001-CH007
         for i in range(1, 8): df[f"Bottom Zone #{i}"] = df.get(f"CH{(i+7):03d}")  # CH008-CH014
         
@@ -335,24 +354,20 @@ def create_unified_figure(df, machine_type, initial_idx, theme_mode):
     top_colors = ["#FF0000", "#008000", "#0000FF", "#8A2BE2", "#A52A2A", "#FFA500", "#9ACD32"]
     bottom_colors = ["#00FFFF", "#FF1493", "#808080", "#00FF00", "#008000", "#0000FF", "#8A2BE2"]
 
-    # Top Zone (CH001-CH007)
     for i in range(1, 8):
         fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get(f"Top Zone #{i}"), name=f"Top Z#{i} (CH{i:03d})", mode="lines", line=dict(color=top_colors[i-1], width=2), visible=(initial_idx==0)), secondary_y=False)
         traces_info.append(0)
 
-    # Bottom Zone (CH008-CH014)
     for i in range(1, 8):
         ch_num = 7 + i
         fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get(f"Bottom Zone #{i}"), name=f"Bottom Z#{i} (CH{ch_num:03d})", mode="lines", line=dict(color=bottom_colors[i-1], width=2), visible=(initial_idx==1)), secondary_y=False)
         traces_info.append(1)
 
-    # Dryer
     fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("Dryer #1"), name="Dryer #1 (CH016)", mode="lines", line=dict(color="#FFA500", width=2), visible=(initial_idx==2)), secondary_y=False)
     traces_info.append(2)
     fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("Dryer #2"), name="Dryer #2 (CH017)", mode="lines", line=dict(color="#9ACD32", width=2), visible=(initial_idx==2)), secondary_y=False)
     traces_info.append(2)
 
-    # O2 / N2
     ent_ch = "CH019" if machine_type == "NB1" else "CH018"
     fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("ENTRANCE O2"), name=f"ENTRANCE O2 ({ent_ch})", mode="lines", line=dict(color="#FF80FF", width=2), visible=(initial_idx==3)), secondary_y=False)
     traces_info.append(3)
@@ -363,7 +378,6 @@ def create_unified_figure(df, machine_type, initial_idx, theme_mode):
         fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("N2 Flow"), name="N2 Flow (CH018)", mode="lines", line=dict(color="#ADD8E6", width=2), visible=(initial_idx==3)), secondary_y=True)
         traces_info.append(3)
 
-    # Dew Point
     if machine_type == "NB1" and "DEW POINT" in df.columns:
         fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("DEW POINT"), name="Dew Point (CH020)", mode="lines", line=dict(color="#00ecff", width=2), visible=(initial_idx==4)), secondary_y=False)
         traces_info.append(4)
@@ -462,7 +476,6 @@ if uploaded_files:
         
         st.success(f"รวมข้อมูลสำเร็จ {len(uploaded_files)} ไฟล์ ({len(df)} แถว) - โหมด {detected_machine} (ดึงเฉพาะค่า MAX)")
         
-        # แสดงผลกราฟ
         st.plotly_chart(create_unified_figure(df, detected_machine, 0, theme_choice), use_container_width=True)
         st.plotly_chart(create_unified_figure(df, detected_machine, 1, theme_choice), use_container_width=True)
         st.plotly_chart(create_unified_figure(df, detected_machine, 2, theme_choice), use_container_width=True)
@@ -471,9 +484,6 @@ if uploaded_files:
         if detected_machine == "NB1":
             st.plotly_chart(create_unified_figure(df, detected_machine, 4, theme_choice), use_container_width=True)
 
-        # ==========================================
-        # 8. ส่วนดาวน์โหลดข้อมูล (แสดงใน Sidebar)
-        # ==========================================
         with export_placeholder:
             st.markdown("---")
             st.subheader("💾 ส่งออกข้อมูล (Export Data)")
