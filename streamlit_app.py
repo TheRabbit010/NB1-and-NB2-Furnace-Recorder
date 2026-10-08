@@ -21,7 +21,7 @@ if "dad_uploader_key" not in st.session_state:
     st.session_state["dad_uploader_key"] = 0
 
 # ==========================================
-# 2. CSS Injector (แก้ไขให้ Sidebar และปุ่มเปิดลูกศรเด่นชัด)
+# 2. CSS Injector (แก้ไข CSS ให้ Sidebar แสดงผลชัดเจน)
 # ==========================================
 st.markdown("""
     <style>
@@ -231,7 +231,7 @@ def parse_dad_to_df(files_data):
         total = body_len // record_size
         
         for i in range(total):
-base = offset + i * record_size
+            base = offset + i * record_size
             hdr = raw[base:base+8]
             if len(hdr) < 8: break
             yr, mo, dy, hr, mn, sc = hdr[0], hdr[1], hdr[2], hdr[3], hdr[4], hdr[5]
