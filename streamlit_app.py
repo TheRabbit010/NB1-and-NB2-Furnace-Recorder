@@ -8,7 +8,7 @@ import io
 import re
 
 # ==========================================
-# 1. Page Config Setup
+# 1. Page Config & Default Setup
 # ==========================================
 st.set_page_config(
     page_title="Recorder Furnace YOKOGAWA (.DAD)",
@@ -21,29 +21,109 @@ if "dad_uploader_key" not in st.session_state:
     st.session_state["dad_uploader_key"] = 0
 
 # ==========================================
-# 2. CSS Injector
+# 2. CSS Injector (ระบบจัดการ UI & Theme)
 # ==========================================
 st.markdown("""
     <style>
-        [data-testid="stSidebar"] {
-            border-right: 1px solid rgba(128, 128, 128, 0.2) !important;
-        }
-        button[kind="header"], [data-testid="collapsedControl"], [data-testid="stSidebarCollapseButton"] {
-            color: #F0B90B !important;
-        }
-        div.stButton > button, [data-testid="stDownloadButton"] > button {
-            border: 1px solid #F0B90B !important;
-            font-weight: bold !important;
-            width: 100%;
-        }
+        [data-testid="stHeader"] { background-color: transparent !important; }
+        [data-testid="stToolbar"], #MainMenu, .stAppDeployButton { display: none !important; } 
     </style>
 """, unsafe_allow_html=True)
 
+dark_css = """
+<style>
+    html, body, .stApp, [data-testid="stAppViewContainer"] { 
+        background-color: #0e1117 !important; 
+        color: #ffffff !important; 
+    }
+    [data-testid="stSidebar"], [data-testid="stSidebarHeader"] { background-color: #161b22 !important; }
+    .stMarkdown, h1, h2, h3, h4, h5, h6, p, span, label { color: #ffffff !important; }
+    
+    button[kind="header"], [data-testid="collapsedControl"] { color: #F0B90B !important; }
+    button[kind="header"] svg, [data-testid="collapsedControl"] svg { fill: #F0B90B !important; }
+
+    div.stButton > button, [data-testid="stDownloadButton"] > button {
+        background-color: #21262d !important;
+        color: #ffffff !important;
+        border: 1px solid #F0B90B !important;
+        font-weight: bold !important;
+        width: 100%;
+    }
+    div.stButton > button:hover, [data-testid="stDownloadButton"] > button:hover {
+        background-color: #F0B90B !important;
+        color: #000000 !important;
+    }
+    div.stButton > button *, [data-testid="stDownloadButton"] > button * { color: inherit !important; }
+
+    [data-testid="stFileUploader"] { background-color: #0e1117 !important; border: 1.5px solid #F0B90B !important; border-radius: 8px !important; padding: 10px !important; }
+    [data-testid="stFileUploader"] section { background-color: #1c2128 !important; border: 1px dashed #F0B90B !important; }
+    [data-testid="stFileUploaderFileData"] { background-color: #21262d !important; border: 1px solid #F0B90B !important; }
+    
+    [data-testid="stFileUploader"] button {
+        background-color: #21262d !important;
+        color: #ffffff !important;
+        border: 1px solid #F0B90B !important;
+    }
+    [data-testid="stFileUploader"] button:hover {
+        background-color: #F0B90B !important;
+        color: #000000 !important;
+    }
+</style>
+"""
+
+bright_css = """
+<style>
+    html, body, .stApp, [data-testid="stAppViewContainer"] { 
+        background-color: #f4f6f9 !important; 
+        color: #1a1a1a !important; 
+    }
+    [data-testid="stSidebar"], [data-testid="stSidebarHeader"] { background-color: #e9ecef !important; }
+    .stMarkdown, h1, h2, h3, h4, h5, h6, p, span, label { color: #1a1a1a !important; }
+    
+    button[kind="header"], [data-testid="collapsedControl"] { color: #0056b3 !important; }
+    button[kind="header"] svg, [data-testid="collapsedControl"] svg { fill: #0056b3 !important; }
+
+    div.stButton > button, [data-testid="stDownloadButton"] > button {
+        background-color: #ffffff !important;
+        color: #0056b3 !important;
+        border: 1.5px solid #0056b3 !important;
+        font-weight: bold !important;
+        width: 100%;
+    }
+    div.stButton > button:hover, [data-testid="stDownloadButton"] > button:hover {
+        background-color: #0056b3 !important;
+        color: #ffffff !important;
+    }
+    div.stButton > button *, [data-testid="stDownloadButton"] > button * { color: inherit !important; }
+
+    [data-testid="stFileUploader"] { background-color: #ffffff !important; border: 1.5px solid #0056b3 !important; border-radius: 8px !important; padding: 10px !important; }
+    [data-testid="stFileUploader"] section { background-color: #f8f9fa !important; border: 1px dashed #0056b3 !important; }
+    [data-testid="stFileUploaderFileData"] { background-color: #e9ecef !important; border: 1px solid #0056b3 !important; }
+    
+    [data-testid="stFileUploader"] button {
+        background-color: #ffffff !important;
+        color: #0056b3 !important;
+        border: 1px solid #0056b3 !important;
+    }
+    [data-testid="stFileUploader"] button:hover {
+        background-color: #0056b3 !important;
+        color: #ffffff !important;
+    }
+</style>
+"""
+
+system_css = """
+<style>
+    div.stButton > button, [data-testid="stDownloadButton"] > button { width: 100%; }
+</style>
+"""
+
 # ==========================================
-# 3. Sidebar UI
+# 3. Sidebar UI (แผงควบคุมหลักด้านซ้าย)
 # ==========================================
 with st.sidebar:
     st.header("⚙️ แผงควบคุม (Controls)")
+    theme_choice = st.radio("🎨 เลือกโทนสีหน้าจอ (Theme):", ["Dark", "Bright", "System"], index=0, horizontal=True)
     st.markdown("---")
     
     uploaded_files = st.file_uploader(
@@ -60,19 +140,28 @@ with st.sidebar:
 
     export_placeholder = st.container()
 
+if theme_choice == "Dark":
+    st.markdown(dark_css, unsafe_allow_html=True)
+elif theme_choice == "Bright":
+    st.markdown(bright_css, unsafe_allow_html=True)
+else:
+    st.markdown(system_css, unsafe_allow_html=True)
+
 # ==========================================
 # 4. Main UI Header
 # ==========================================
+credit_color = "#8b949e" if theme_choice == "Dark" else "#6c757d" if theme_choice == "Bright" else "gray"
+
 title_placeholder = st.empty()
 title_placeholder.title("🏭 Recorder NB1 and NB2 Furnace from YOKOGAWA (.DAD Data)")
 
-st.markdown("<p style='font-size: 0.88rem; margin-top: -15px; margin-bottom: 15px; opacity: 0.7;'><i>Wichien Laithanakit - Brazing Engineer - VSTS / Power Chonburi</i></p>", unsafe_allow_html=True)
+st.markdown(f"<p style='color: {credit_color}; font-size: 0.88rem; margin-top: -15px; margin-bottom: 15px;'><i>Wichien Laithanakit - Brazing Engineer - VSTS / Power Chonburi</i></p>", unsafe_allow_html=True)
 
 file_names_placeholder = st.empty() 
 st.markdown("---")
 
 # ==========================================
-# 5. DAD Parser Logic (บังคับดึงเฉพาะค่า MAX)
+# 5. DAD Parser Logic (อ่านค่า MAX + ตรวจสอบ NB1/NB2)
 # ==========================================
 def extract_date_from_filename(filename):
     match = re.search(r'_(\d{2})(\d{2})(\d{2})_', filename)
@@ -102,12 +191,13 @@ def find_dad_params(raw, machine_type):
                         return offset, rs, (rs - 8) // 4
     return default_offset, default_rs, (default_rs - 8) // 4
 
-@st.cache_data(show_spinner="⏳ กำลังประมวลผลไฟล์ .DAD (ดึงเฉพาะค่า MAX เท่านั้น)...")
+@st.cache_data(show_spinner="⏳ กำลังประมวลผลไฟล์ .DAD (ดึงเฉพาะค่า MAX)...")
 def parse_dad_to_df(files_data):
     all_records = []
     machine_type = "Unknown"
     
     for fname, raw in files_data:
+        # แยกเตาอัตโนมัติจากชื่อไฟล์
         if "_DATA" in fname.upper():
             machine_type = "NB2"
         else:
@@ -145,12 +235,10 @@ def parse_dad_to_df(files_data):
                 data_pos = base + 8 + ci*4
                 if data_pos + 4 > len(raw): break
                 
-                # -------------------------------------------------------------
-                # 🎯 บังคับอ่านเฉพาะค่า MAX (2 ไบต์หลังของแต่ละ Channel)
-                # -------------------------------------------------------------
+                # อ่านค่า MAX (2 ไบต์หลังของ 4 ไบต์)
                 max_v = struct.unpack_from('>h', raw, data_pos + 2)[0]
                 
-                # กรองค่าสัญญานหลุด/Out of range (-32768, 32767) ออก
+                # กรองค่า Error / Sensor Out of range
                 if max_v not in (-32768, -32767, 32767) and (-30000 < max_v < 30000):
                     val = max_v / 10.0
                     if -100.0 <= val <= 2000.0:
@@ -166,16 +254,13 @@ def parse_dad_to_df(files_data):
                 
     df = pd.DataFrame(all_records)
     if not df.empty:
-        # ลบจุดเวลาซ้ำ และเรียงลำดับเวลาอย่างถูกต้อง
         df = df.drop_duplicates(subset=["DateTime"]).sort_values("DateTime").reset_index(drop=True)
         
-        # กรองเฉพาะช่วงเวลาหลักเพื่อตัดไบต์หลุดขอบ
+        # กรองเฉพาะช่วงเวลาหลัก
         median_dt = df["DateTime"].iloc[len(df)//2]
         df = df[abs(df["DateTime"] - median_dt) <= pd.Timedelta(days=10)]
         
-        # ==========================================
-        # 🟢 การกำหนด Channel ตามสเปกรูปภาพ
-        # ==========================================
+        # Map Channel ตรงตามสเปกของรูปภาพ
         for i in range(1, 8): df[f"Top Zone #{i}"] = df.get(f"CH{i:03d}")        # CH001-CH007
         for i in range(1, 8): df[f"Bottom Zone #{i}"] = df.get(f"CH{(i+7):03d}")  # CH008-CH014
         
@@ -197,17 +282,25 @@ def parse_dad_to_df(files_data):
     return df, machine_type
 
 # ==========================================
-# 6. ฟังก์ชันสร้างกราฟ
+# 6. Industrial Style & Chart Creator
 # ==========================================
-def apply_industrial_style(fig, y_title, is_dual_axis=False):
+def apply_industrial_style(fig, y_title, theme_mode, is_dual_axis=False):
+    t_bg = "#161b22" if theme_mode == "Dark" else "#ffffff" if theme_mode == "Bright" else "rgba(0,0,0,0)"
+    t_paper = "#0e1117" if theme_mode == "Dark" else "#f4f6f9" if theme_mode == "Bright" else "rgba(0,0,0,0)"
+    t_font = "#ffffff" if theme_mode == "Dark" else "#1a1a1a" if theme_mode == "Bright" else "gray"
+    t_grid = "rgba(255,255,255,0.08)" if theme_mode == "Dark" else "rgba(0,0,0,0.1)"
+    t_line = "#555555" if theme_mode == "Dark" else "#cccccc"
+
     layout_args = dict(
+        plot_bgcolor=t_bg,
+        paper_bgcolor=t_paper,
         hovermode="x unified",
         showlegend=True,
         legend=dict(
-            font=dict(size=12, family="Arial Bold"),
+            font=dict(color=t_font, size=12, family="Arial Bold"),
             bgcolor="rgba(128, 128, 128, 0.1)",
-            bordercolor="gray",
-            borderwidth=1,
+            bordercolor=t_line,
+            borderwidth=1.5,
             orientation="v",
             yanchor="top",
             y=1,
@@ -215,22 +308,27 @@ def apply_industrial_style(fig, y_title, is_dual_axis=False):
             x=1.02
         ),
         xaxis=dict(
-            title=dict(text="Absolute Time [Date & Time]", font=dict(size=12)),
-            tickfont=dict(size=10),
+            title=dict(text="Absolute Time [Date & Time]", font=dict(color=t_font, size=12)),
+            tickfont=dict(color=t_font, size=10),
             showgrid=True,
+            gridcolor=t_grid,
+            linecolor=t_line,
             type="date",
         ),
         yaxis=dict(
-            title=dict(text=y_title, font=dict(size=12)),
-            tickfont=dict(size=10),
+            title=dict(text=y_title, font=dict(color=t_font, size=12)),
+            tickfont=dict(color=t_font, size=10),
             showgrid=True,
+            gridcolor=t_grid,
             zeroline=False,
+            linecolor=t_line,
         ),
         height=480, 
     )
     fig.update_layout(**layout_args)
+    return t_font
 
-def create_unified_figure(df, machine_type, initial_idx):
+def create_unified_figure(df, machine_type, initial_idx, theme_mode):
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     traces_info = []
     
@@ -281,7 +379,11 @@ def create_unified_figure(df, machine_type, initial_idx):
     if machine_type == "NB1":
         buttons.append(dict(label="5. Dew Point", method="update", args=[{"visible": [t == 4 for t in traces_info]}, {"title.text": "<b>5. Dew point 'Cdp (CH020)</b>", "yaxis.title.text": "Dew Point (°Cdp)", "yaxis.range": [-100, 10], "yaxis2.visible": False}]))
 
-    apply_industrial_style(fig, "Temperature (°C)", is_dual_axis=True)
+    btn_bg = "rgba(22, 27, 34, 0.8)" if theme_mode == "Dark" else "rgba(255, 255, 255, 0.9)" if theme_mode == "Bright" else "rgba(128, 128, 128, 0.2)"
+    btn_font = "#FFFFFF" if theme_mode == "Dark" else "#0056b3" if theme_mode == "Bright" else "gray"
+    btn_border = "rgba(240, 185, 11, 0.5)" if theme_mode == "Dark" else "rgba(0, 86, 179, 0.5)" if theme_mode == "Bright" else "rgba(128, 128, 128, 0.5)"
+
+    title_font_color = apply_industrial_style(fig, "Temperature (°C)", theme_mode, is_dual_axis=True)
     
     initial_title = buttons[initial_idx]["args"][1]["title.text"]
     initial_y_title = buttons[initial_idx]["args"][1]["yaxis.title.text"]
@@ -291,7 +393,7 @@ def create_unified_figure(df, machine_type, initial_idx):
     fig.update_layout(
         title=dict(
             text=initial_title, 
-            font=dict(size=18),
+            font=dict(size=18, color=title_font_color),
             x=0.0,
             y=0.98,
             xref="paper",
@@ -321,9 +423,9 @@ def create_unified_figure(df, machine_type, initial_idx):
                 xanchor="left",
                 yanchor="bottom",
                 buttons=buttons,
-                font=dict(size=11, family="Arial Bold"),
-                bgcolor="rgba(128, 128, 128, 0.1)",  
-                bordercolor="gray",
+                font=dict(color=btn_font, size=11, family="Arial Bold"),
+                bgcolor=btn_bg,  
+                bordercolor=btn_border,
             )
         ]
     )
@@ -355,18 +457,23 @@ if uploaded_files:
         title_placeholder.title(f"🏭 Recorder {detected_machine} Furnace from YOKOGAWA (.DAD Data)")
         file_names_str = ", ".join([f.name for f in uploaded_files])
         
-        file_names_placeholder.markdown(f"<span style='font-size:1.1rem;'><b>📁 File(s):</b> {file_names_str}</span>", unsafe_allow_html=True)
+        subtext_color = "#a0aab2" if theme_choice == "Dark" else "#666666" if theme_choice == "Bright" else "gray"
+        file_names_placeholder.markdown(f"<span style='color:{subtext_color}; font-size:1.1rem;'><b>📁 File(s):</b> {file_names_str}</span>", unsafe_allow_html=True)
         
         st.success(f"รวมข้อมูลสำเร็จ {len(uploaded_files)} ไฟล์ ({len(df)} แถว) - โหมด {detected_machine} (ดึงเฉพาะค่า MAX)")
         
-        st.plotly_chart(create_unified_figure(df, detected_machine, 0), use_container_width=True)
-        st.plotly_chart(create_unified_figure(df, detected_machine, 1), use_container_width=True)
-        st.plotly_chart(create_unified_figure(df, detected_machine, 2), use_container_width=True)
-        st.plotly_chart(create_unified_figure(df, detected_machine, 3), use_container_width=True)
+        # แสดงผลกราฟ
+        st.plotly_chart(create_unified_figure(df, detected_machine, 0, theme_choice), use_container_width=True)
+        st.plotly_chart(create_unified_figure(df, detected_machine, 1, theme_choice), use_container_width=True)
+        st.plotly_chart(create_unified_figure(df, detected_machine, 2, theme_choice), use_container_width=True)
+        st.plotly_chart(create_unified_figure(df, detected_machine, 3, theme_choice), use_container_width=True)
         
         if detected_machine == "NB1":
-            st.plotly_chart(create_unified_figure(df, detected_machine, 4), use_container_width=True)
+            st.plotly_chart(create_unified_figure(df, detected_machine, 4, theme_choice), use_container_width=True)
 
+        # ==========================================
+        # 8. ส่วนดาวน์โหลดข้อมูล (แสดงใน Sidebar)
+        # ==========================================
         with export_placeholder:
             st.markdown("---")
             st.subheader("💾 ส่งออกข้อมูล (Export Data)")
@@ -396,4 +503,4 @@ if uploaded_files:
         st.error(f"❌ เกิดข้อผิดพลาดในการประมวลผลไฟล์: {e}")
 
 else:
-    st.info("👈 กรุณาเปิดแถบควบคุมด้านซ้ายมือ (Sidebar) เพื่ออัปโหลดไฟล์ .DAD")
+    st.info("👈 กรุณาเปิดแถบควบคุมด้านซ้ายมือ (Sidebar) เพื่ออัปโหลดไฟล์ .DAD (สามารถอัปโหลดพร้อมกันได้หลายไฟล์)")
