@@ -72,7 +72,7 @@ file_names_placeholder = st.empty()
 st.markdown("---")
 
 # ==========================================
-# 5. DAD Parser Logic (แมป Channel ตรงตามรูปภาพล่าสุด)
+# 5. DAD Parser Logic (บังคับดึงเฉพาะค่า MAX)
 # ==========================================
 def extract_date_from_filename(filename):
     match = re.search(r'_(\d{2})(\d{2})(\d{2})_', filename)
@@ -102,7 +102,7 @@ def find_dad_params(raw, machine_type):
                         return offset, rs, (rs - 8) // 4
     return default_offset, default_rs, (default_rs - 8) // 4
 
-@st.cache_data(show_spinner="⏳ กำลังประมวลผลไฟล์ .DAD (แมปปิ้ง Channel เฉพาะเตา)...")
+@st.cache_data(show_spinner="⏳ กำลังประมวลผลไฟล์ .DAD (ดึงเฉพาะค่า MAX เท่านั้น)...")
 def parse_dad_to_df(files_data):
     all_records = []
     machine_type = "Unknown"
@@ -145,9 +145,12 @@ def parse_dad_to_df(files_data):
                 data_pos = base + 8 + ci*4
                 if data_pos + 4 > len(raw): break
                 
-                # อ่านเฉพาะค่า MAX (Column Max)
+                # -------------------------------------------------------------
+                # 🎯 บังคับอ่านเฉพาะค่า MAX (2 ไบต์หลังของแต่ละ Channel)
+                # -------------------------------------------------------------
                 max_v = struct.unpack_from('>h', raw, data_pos + 2)[0]
                 
+                # กรองค่าสัญญานหลุด/Out of range (-32768, 32767) ออก
                 if max_v not in (-32768, -32767, 32767) and (-30000 < max_v < 30000):
                     val = max_v / 10.0
                     if -100.0 <= val <= 2000.0:
@@ -163,28 +166,29 @@ def parse_dad_to_df(files_data):
                 
     df = pd.DataFrame(all_records)
     if not df.empty:
+        # ลบจุดเวลาซ้ำ และเรียงลำดับเวลาอย่างถูกต้อง
         df = df.drop_duplicates(subset=["DateTime"]).sort_values("DateTime").reset_index(drop=True)
         
-        # กรองเฉพาะช่วงเวลาที่ถูกต้อง
+        # กรองเฉพาะช่วงเวลาหลักเพื่อตัดไบต์หลุดขอบ
         median_dt = df["DateTime"].iloc[len(df)//2]
         df = df[abs(df["DateTime"] - median_dt) <= pd.Timedelta(days=10)]
         
         # ==========================================
-        # 🟢 แมปปิ้ง Channel ตามตารางภาพถ่ายชุดใหม่ (NB1 และ NB2)
+        # 🟢 การกำหนด Channel ตามสเปกรูปภาพ
         # ==========================================
-        for i in range(1, 8): df[f"Top Zone #{i}"] = df.get(f"CH{i:03d}")        # CH001-CH007 (ทั้ง NB1 และ NB2)
-        for i in range(1, 8): df[f"Bottom Zone #{i}"] = df.get(f"CH{(i+7):03d}")  # CH008-CH014 (ทั้ง NB1 และ NB2)
+        for i in range(1, 8): df[f"Top Zone #{i}"] = df.get(f"CH{i:03d}")        # CH001-CH007
+        for i in range(1, 8): df[f"Bottom Zone #{i}"] = df.get(f"CH{(i+7):03d}")  # CH008-CH014
         
         df["EXIT O2"] = df.get("CH015")
         df["Dryer #1"] = df.get("CH016")
         df["Dryer #2"] = df.get("CH017")
         
         if machine_type == "NB1":
-            df["ENTRANCE O2"] = df.get("CH019")  # CH019 สำหรับ NB1
-            df["N2 Flow"] = df.get("CH018")      # CH018 สำหรับ NB1
-            df["DEW POINT"] = df.get("CH020")    # CH020 สำหรับ NB1
+            df["ENTRANCE O2"] = df.get("CH019")
+            df["N2 Flow"] = df.get("CH018")
+            df["DEW POINT"] = df.get("CH020")
         else:
-            df["ENTRANCE O2"] = df.get("CH018")  # CH018 สำหรับ NB2
+            df["ENTRANCE O2"] = df.get("CH018")
             df["N2 Flow"] = None
             df["DEW POINT"] = None
             
@@ -353,7 +357,7 @@ if uploaded_files:
         
         file_names_placeholder.markdown(f"<span style='font-size:1.1rem;'><b>📁 File(s):</b> {file_names_str}</span>", unsafe_allow_html=True)
         
-        st.success(f"รวมข้อมูลสำเร็จ {len(uploaded_files)} ไฟล์ ({len(df)} แถว) - โหมด {detected_machine} (อ่านเฉพาะค่า MAX)")
+        st.success(f"รวมข้อมูลสำเร็จ {len(uploaded_files)} ไฟล์ ({len(df)} แถว) - โหมด {detected_machine} (ดึงเฉพาะค่า MAX)")
         
         st.plotly_chart(create_unified_figure(df, detected_machine, 0), use_container_width=True)
         st.plotly_chart(create_unified_figure(df, detected_machine, 1), use_container_width=True)
