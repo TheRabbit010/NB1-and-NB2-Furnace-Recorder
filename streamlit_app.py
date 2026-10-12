@@ -1,10 +1,12 @@
 import streamlit as st
 import struct
 import io
+import re
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
+from collections import defaultdict
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -110,14 +112,15 @@ def find_dad_params(raw):
     for offset in range(10000, max_search):
         yr, mo, dy, hr, mn, sc = raw[offset:offset+6]
         if 0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59:
-            for rs in [84, 88, 92, 96, 80, 100, 128]:
+            # เพิ่ม 104, 108 เพื่อรองรับข้อมูลที่กว้างขึ้น (เช่น 20+ Channels)
+            for rs in [80, 84, 88, 92, 96, 100, 104, 108, 128]:
                 if offset + rs*2 + 6 < len(raw):
                     yr2, mo2, dy2, hr2, mn2, sc2 = raw[offset+rs : offset+rs+6]
                     yr3, mo3, dy3, hr3, mn3, sc3 = raw[offset+rs*2 : offset+rs*2+6]
                     if (0 <= yr2 <= 99 and 1 <= mo2 <= 12 and 1 <= dy2 <= 31 and 0 <= hr2 <= 23) and \
                        (0 <= yr3 <= 99 and 1 <= mo3 <= 12 and 1 <= dy3 <= 31 and 0 <= hr3 <= 23):
                         return offset, rs
-    return 15008, 84
+    return 15008, 88
 
 def parse_dad(raw: bytes, active_channels) -> list:
     records = []
@@ -154,7 +157,8 @@ def parse_dad(raw: bytes, active_channels) -> list:
             if min_v not in (-32768, -32767, 32767, 32766) and (-30000 < min_v < 30000):
                 min_val = min_v / 10.0
                 max_val = max_v / 10.0
-                if -200.0 <= min_val <= 2000.0 and -200.0 <= max_val <= 2000.0:
+                # ขยายขอบเขตการรับค่าเผื่อไว้ที่ -1000 ถึง 10000 (แก้ปัญหาค่า N2 ที่ทะลุไปถึงระดับพัน)
+                if -1000.0 <= min_val <= 10000.0 and -1000.0 <= max_val <= 10000.0:
                     rec[f'{ch}_min'] = round(min_val, 1)
                     rec[f'{ch}_max'] = round(max_val, 1)
                     rec[f'{ch}_avg'] = round((min_val + max_val) / 2.0, 1)
@@ -399,11 +403,12 @@ files_data = [(f.name, f.read()) for f in uploaded]
 machine_type, active_channels = check_machine_type([f[0] for f in files_data])
 
 @st.cache_data(show_spinner=f'⏳ กำลังประมวลผลไฟล์จากเครื่อง {machine_type}...')
-def process_dad_files(files_d, mode_k, act_channels):
+def load_data_auto(files_d, mode_k, act_channels):
     all_records = []
     for fname, raw in files_d:
         recs = parse_dad(raw, act_channels)
         
+        # ตัดข้อมูลขยะช่วงต่อไฟล์ทิ้ง 3 บรรทัดแรกและ 2 บรรทัดสุดท้าย
         if len(recs) > 10:
             all_records.extend(recs[3:-2])
         else:
@@ -413,9 +418,21 @@ def process_dad_files(files_d, mode_k, act_channels):
     
     all_records.sort(key=lambda x: x['ts'])
     
+    # ── กรองข้อมูล Outlier อิงความต่อเนื่องของเวลา (Time Continuity) ──
     if len(all_records) > 0:
-        mid_ts = all_records[len(all_records) // 2]['ts']
-        all_records = [r for r in all_records if abs((r['ts'] - mid_ts).days) <= 30]
+        streaks = []
+        current_streak = [all_records[0]]
+        for i in range(1, len(all_records)):
+            # ถ้าระยะเวลาห่างกันเกิน 2 วัน ถือว่าเป็นข้อมูลขยะที่กระโดดข้ามปี
+            if (all_records[i]['ts'] - all_records[i-1]['ts']).total_seconds() <= 86400 * 2:
+                current_streak.append(all_records[i])
+            else:
+                streaks.append(current_streak)
+                current_streak = [all_records[i]]
+        streaks.append(current_streak)
+        
+        # เลือกกลุ่มข้อมูลที่ยาวที่สุด (ตัดพวกค่าขยะที่เวลาเพี้ยนทิ้ง)
+        all_records = max(streaks, key=len)
         
     seen = set()
     unique = []
@@ -429,7 +446,7 @@ def process_dad_files(files_d, mode_k, act_channels):
             unique.append(new_r)
     return unique
 
-data = process_dad_files(tuple((n,d) for n,d in files_data), mode_key, tuple(active_channels))
+data = load_data_auto(tuple((n,d) for n,d in files_data), mode_key, tuple(active_channels))
 
 if len(data) == 0:
     st.error('🚨 ไม่พบข้อมูลที่อ่านได้จากไฟล์ที่อัปโหลด หรือรูปแบบไฟล์ไม่ถูกต้อง')
