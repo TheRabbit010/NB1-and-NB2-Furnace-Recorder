@@ -43,7 +43,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Constants & Configuration ─────────────────────────────────────────────────
-# NB1 Channels (เอาหน่วย m3/hr ออกจาก CH018 ตามความต้องการ)
+# NB1 Channels 
 CH_NB1 = [
     ('CH001', 'Top Z#1',       '°C'),
     ('CH002', 'Top Z#2',       '°C'),
@@ -98,10 +98,21 @@ COLORS_N2 = {'CH018': '#2E75B6'}
 COLORS_DEW = {'CH020': '#1D9E75'}
 
 def check_machine_type(filenames):
+    has_nb1 = False
+    has_nb2 = False
     for f in filenames:
         if 'DATA' in f.upper():
-            return 'NB2', CH_NB2
-    return 'NB1', CH_NB1
+            has_nb2 = True
+        else:
+            has_nb1 = True
+            
+    # ป้องกันการอัปโหลดไฟล์ผสมกันระหว่าง NB1 และ NB2
+    if has_nb1 and has_nb2:
+        return 'MIXED', []
+    elif has_nb2:
+        return 'NB2', CH_NB2
+    else:
+        return 'NB1', CH_NB1
 
 # ── Auto-Detect BPC & Parser For Binary .DAD ─────────────────────────────────
 def find_dad_params(raw):
@@ -125,7 +136,6 @@ def parse_dad(raw: bytes, active_channels) -> list:
     records = []
     offset, record_size = find_dad_params(raw)
     
-    # Auto-Detect ว่าเป็น Event Data (2 bytes) หรือ Display Data (4 bytes)
     bpc = 4 if record_size >= 70 else 2
     
     body_len = len(raw) - offset
@@ -147,7 +157,7 @@ def parse_dad(raw: bytes, active_channels) -> list:
         except ValueError: continue
             
         rec = {'ts': ts}
-        for ch, _, _ in active_channels:
+        for ch, _, unit in active_channels:
             ch_idx = int(ch.replace('CH', '')) - 1
             data_pos = base + 8 + (ch_idx * bpc)
             
@@ -155,7 +165,6 @@ def parse_dad(raw: bytes, active_channels) -> list:
                 rec[f'{ch}_min'] = rec[f'{ch}_max'] = rec[f'{ch}_avg'] = rec[ch] = None
                 continue
             
-            # เรียง Min/Max ให้ถูกต้อง เพื่อให้กราฟ MAX สมูทและไม่ขรุขระ
             v1 = struct.unpack_from('>h', raw, data_pos)[0]
             if bpc == 4 and data_pos + 4 <= base + record_size:
                 v2 = struct.unpack_from('>h', raw, data_pos + 2)[0]
@@ -345,8 +354,8 @@ with st.sidebar:
     )
     
     st.markdown("---")
-    st.markdown('### ⚙️ ตั้งค่าการแสดงผลกราฟ')
-
+    st.markdown('### ⚙️ ตั้งค่าการอ่านไฟล์และกราฟ')
+    
     value_mode = st.selectbox(
         'เลือกประเภทของค่าที่ต้องการวิเคราะห์:',
         options=['MIN', 'AVG (เฉลี่ย)', 'MAX'],
@@ -361,6 +370,11 @@ if not uploaded:
 files_data = [(f.name, f.read()) for f in uploaded]
 machine_type, active_channels = check_machine_type([f[0] for f in files_data])
 
+# แจ้งเตือนและหยุดทำงานหากไฟล์ผสมกันระหว่าง NB1 และ NB2
+if machine_type == 'MIXED':
+    st.error('🚨 ตรวจพบการอัปโหลดไฟล์จากทั้งเครื่อง NB1 และ NB2 ปะปนกัน! กรุณากดปุ่ม "ล้างข้อมูล" และอัปโหลดไฟล์จากเครื่องใดเครื่องหนึ่งเท่านั้นครับ')
+    st.stop()
+
 @st.cache_data(show_spinner=f'⏳ กำลังประมวลผลไฟล์จากเครื่อง {machine_type}...')
 def process_dad_files(files_d, mode_k, act_channels):
     all_records = []
@@ -373,14 +387,19 @@ def process_dad_files(files_d, mode_k, act_channels):
             all_records.extend(recs)
         
     if not all_records: return []
-    
     all_records.sort(key=lambda x: x['ts'])
     
-    # ── กรองข้อมูล Outlier อิงความต่อเนื่องของเวลา (Median Filter) ไม่ให้กราฟขาดตอน ──
     if len(all_records) > 0:
-        sorted_ts = sorted([r['ts'] for r in all_records])
-        mid_ts = sorted_ts[len(sorted_ts) // 2]
-        all_records = [r for r in all_records if abs((r['ts'] - mid_ts).days) <= 15]
+        streaks = []
+        current_streak = [all_records[0]]
+        for i in range(1, len(all_records)):
+            if (all_records[i]['ts'] - all_records[i-1]['ts']).total_seconds() <= 86400 * 2:
+                current_streak.append(all_records[i])
+            else:
+                streaks.append(current_streak)
+                current_streak = [all_records[i]]
+        streaks.append(current_streak)
+        all_records = max(streaks, key=len)
         
     seen = set()
     unique = []
@@ -402,7 +421,6 @@ if len(data) == 0:
 
 dt_start = data[0]['ts']
 dt_end = data[-1]['ts']
-
 duration = dt_end - dt_start
 hrs = int(duration.total_seconds() // 3600)
 mins = int((duration.total_seconds() % 3600) // 60)
@@ -426,13 +444,16 @@ tab_chart, tab_summary, tab_download = st.tabs([
 with tab_chart:
     st.markdown('<br>', unsafe_allow_html=True)
     
+    # กำหนดสเกลอุณหภูมิ Top & Bottom แยกตามเครื่อง
+    tb_y_range = [540, 650] if machine_type == 'NB1' else [400, 650]
+    
     top_chs = [ch for ch in active_channels if ch[0] in ['CH001','CH002','CH003','CH004','CH005','CH006','CH007']]
-    fig_top = render_single_chart(data, top_chs, COLORS_TOP, f'Top Zones Temperature ({machine_type})', [400, 650], '°C')
+    fig_top = render_single_chart(data, top_chs, COLORS_TOP, f'Top Zones Temperature ({machine_type})', tb_y_range, '°C')
     if fig_top: st.plotly_chart(fig_top, use_container_width=True, theme="streamlit")
     st.markdown('<br>', unsafe_allow_html=True)
 
     bot_chs = [ch for ch in active_channels if ch[0] in ['CH008','CH009','CH010','CH011','CH012','CH013','CH014']]
-    fig_bot = render_single_chart(data, bot_chs, COLORS_BOT, f'Bottom Zones Temperature ({machine_type})', [400, 650], '°C')
+    fig_bot = render_single_chart(data, bot_chs, COLORS_BOT, f'Bottom Zones Temperature ({machine_type})', tb_y_range, '°C')
     if fig_bot: st.plotly_chart(fig_bot, use_container_width=True, theme="streamlit")
     st.markdown('<br>', unsafe_allow_html=True)
 
@@ -450,7 +471,6 @@ with tab_chart:
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH019']]
         n2_chs = [ch for ch in active_channels if ch[0] == 'CH018']
         
-        # ปรับ Fixed Scale N2 ให้เป็น 0-5000 ตามที่คุณต้องการ
         fig_o2_n2 = render_dual_axis_chart(
             data, o2_chs, n2_chs, 
             COLORS_O2_NB1, COLORS_N2, 
