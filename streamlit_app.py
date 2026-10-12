@@ -371,13 +371,18 @@ def load_data_auto(files_d, mode_k, act_channels):
     all_records = []
     for fname, raw in files_d:
         recs = parse_dad(raw, act_channels)
-        all_records.extend(recs)
+        
+        # ── ตัดข้อมูลขยะ 3 บรรทัดแรก และ 2 บรรทัดสุดท้ายของแต่ละไฟล์ทิ้ง ป้องกันเส้นกราฟตก ──
+        if len(recs) > 10:
+            all_records.extend(recs[3:-2])
+        else:
+            all_records.extend(recs)
         
     if not all_records: return []
     
     all_records.sort(key=lambda x: x['ts'])
     
-    # ── กรองข้อมูล Outlier (เวลาเพี้ยน/ข้ามปี) เพื่อป้องกันระบบค้าง ──
+    # ── กรองข้อมูล Outlier (เวลาเพี้ยน/ข้ามปี) ──
     if len(all_records) > 0:
         mid_ts = all_records[len(all_records) // 2]['ts']
         all_records = [r for r in all_records if abs((r['ts'] - mid_ts).days) <= 30]
@@ -443,18 +448,20 @@ with tab_chart:
     
     if machine_type == 'NB2':
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH018']]
-        fig_o2 = render_single_chart(data, o2_chs, COLORS_O2_NB2, 'O2 Concentration Level', [0, 150], 'ppm')
+        # ── ปรับ Scale แกน Y ของ O2 เป็น 0 ถึง 1000 ppm ตามข้อมูลจริง ──
+        fig_o2 = render_single_chart(data, o2_chs, COLORS_O2_NB2, 'O2 Concentration Level', [0, 1000], 'ppm')
         if fig_o2: st.plotly_chart(fig_o2, use_container_width=True, theme="streamlit")
         
     else:
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH019']]
         n2_chs = [ch for ch in active_channels if ch[0] == 'CH018']
         
+        # ── ปรับ Scale แกน Y ของ O2 เป็น 0 ถึง 1000 ppm ──
         fig_o2_n2 = render_dual_axis_chart(
             data, o2_chs, n2_chs, 
             COLORS_O2_NB1, COLORS_N2, 
             'O2 Concentration & N2 Flow Rate', 
-            [0, 150], 'O2 (ppm)', 'N2 (m3/hr)'
+            [0, 1000], 'O2 (ppm)', 'N2 (m3/hr)'
         )
         if fig_o2_n2: st.plotly_chart(fig_o2_n2, use_container_width=True, theme="streamlit")
         st.markdown('<br>', unsafe_allow_html=True)
