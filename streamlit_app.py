@@ -42,7 +42,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Constants & Configuration ─────────────────────────────────────────────────
-# NB1 Channels (จากภาพซ้าย)
+# NB1 Channels
 CH_NB1 = [
     ('CH001', 'Top Z#1',       '°C'),
     ('CH002', 'Top Z#2',       '°C'),
@@ -66,7 +66,7 @@ CH_NB1 = [
     ('CH020', 'DEW POINT',     'Cdp'),
 ]
 
-# NB2 Channels (จากภาพขวา - ไฟล์มีคำว่า DATA)
+# NB2 Channels
 CH_NB2 = [
     ('CH001', 'Top Z#1',       '°C'),
     ('CH002', 'Top Z#2',       '°C'),
@@ -98,7 +98,6 @@ COLORS_DEW = {'CH020': '#1D9E75'}
 
 # ── Check Machine Type ────────────────────────────────────────────────────────
 def check_machine_type(filenames):
-    """ หากชื่อไฟล์ใดมีคำว่า DATA ถือว่าเป็น NB2 มิฉะนั้นเป็น NB1 """
     for f in filenames:
         if 'DATA' in f.upper():
             return 'NB2', CH_NB2
@@ -126,10 +125,6 @@ def parse_dad(raw: bytes, active_channels) -> list:
     body_len = len(raw) - offset
     if body_len <= 0: return records
     total = body_len // record_size
-    
-    # เพื่อรองรับช่องสัญญาณที่เกิน 18 ช่องใน NB1 
-    # เราจะถือว่าลำดับข้อมูลในไฟล์ถูกบันทึกเรียงตาม CH001 - CH020
-    # ซึ่งโดยปกติแต่ละ CH ใช้พื้นที่ 4 ไบต์ต่อจาก Header (8 ไบต์)
     
     for i in range(total):
         base = offset + i * record_size
@@ -266,23 +261,19 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title):
     if y_range:
         fig.update_yaxes(range=y_range, title_text=y_title, title_font=dict(size=14))
     else:
-        # Auto scale
         fig.update_yaxes(title_text=y_title, title_font=dict(size=14))
         
     fig.update_xaxes(
         tickformat='%d/%m\n%H:%M',
-        dtick=1*3600*1000, 
         tickfont=dict(size=11),
         showticklabels=True,
     )
     return fig
 
-# สำหรับกราฟที่มีแกน Y 2 ฝั่ง (O2 & N2 ของ NB1)
 def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, title, y1_range, y1_title, y2_title):
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     ts = [r['ts'] for r in data]
     
-    # Left Axis Traces (O2)
     for i, (ch, name, unit) in enumerate(ch_left):
         color = colors_left[i] if isinstance(colors_left, list) else colors_left.get(ch, '#888')
         fig.add_trace(go.Scatter(
@@ -292,13 +283,12 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>',
         ), secondary_y=False)
 
-    # Right Axis Traces (N2)
     for i, (ch, name, unit) in enumerate(ch_right):
         color = colors_right[i] if isinstance(colors_right, list) else colors_right.get(ch, '#888')
         fig.add_trace(go.Scatter(
             x=ts, y=[r[ch] for r in data],
             name=name, mode='lines',
-            line=dict(color=color, width=1.5, dash='dot'), # ทำให้เส้น N2 เป็นไข่ปลาเพื่อให้แยกง่าย
+            line=dict(color=color, width=1.5, dash='dot'), 
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>',
         ), secondary_y=True)
 
@@ -311,7 +301,7 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
             title="Channels",
             orientation="v",
             yanchor="middle", y=0.5, 
-            xanchor="left", x=1.08, # ขยับออกไปหลบแกน Y ที่ 2
+            xanchor="left", x=1.08, 
             font=dict(size=12),
             itemsizing='constant'
         ),
@@ -323,7 +313,6 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
         
     fig.update_xaxes(
         tickformat='%d/%m\n%H:%M',
-        dtick=1*3600*1000, 
         tickfont=dict(size=11),
         showticklabels=True,
     )
@@ -362,7 +351,6 @@ if not uploaded:
     st.info('👉 กรุณาอัปโหลดไฟล์ .DAD จากแถบเมนูด้านซ้ายเพื่อเริ่มต้นสร้างรายงานวิเคราะห์ข้อมูล')
     st.stop()
 
-# ประมวลผลและเช็คเครื่องอัตโนมัติ
 files_data = [(f.name, f.read()) for f in uploaded]
 machine_type, active_channels = check_machine_type([f[0] for f in files_data])
 
@@ -376,6 +364,12 @@ def load_data_auto(files_d, mode_k, act_channels):
     if not all_records: return []
     
     all_records.sort(key=lambda x: x['ts'])
+    
+    # ── กรองข้อมูล Outlier (เวลาเพี้ยน/ข้ามปี) เพื่อป้องกันระบบค้าง ──
+    if len(all_records) > 0:
+        mid_ts = all_records[len(all_records) // 2]['ts']
+        all_records = [r for r in all_records if abs((r['ts'] - mid_ts).days) <= 30]
+        
     seen = set()
     unique = []
     for r in all_records:
@@ -420,33 +414,27 @@ tab_chart, tab_summary, tab_download = st.tabs([
 with tab_chart:
     st.markdown('<br>', unsafe_allow_html=True)
     
-    # 1. Top Zones (เหมือนกันทั้ง NB1 และ NB2)
     top_chs = [ch for ch in active_channels if ch[0] in ['CH001','CH002','CH003','CH004','CH005','CH006','CH007']]
     fig_top = render_single_chart(data, top_chs, COLORS_TOP, f'Top Zones Temperature ({machine_type})', [400, 650], '°C')
     if fig_top: st.plotly_chart(fig_top, use_container_width=True, theme="streamlit")
     st.markdown('<br>', unsafe_allow_html=True)
 
-    # 2. Bottom Zones (เหมือนกันทั้ง NB1 และ NB2)
     bot_chs = [ch for ch in active_channels if ch[0] in ['CH008','CH009','CH010','CH011','CH012','CH013','CH014']]
     fig_bot = render_single_chart(data, bot_chs, COLORS_BOT, f'Bottom Zones Temperature ({machine_type})', [400, 650], '°C')
     if fig_bot: st.plotly_chart(fig_bot, use_container_width=True, theme="streamlit")
     st.markdown('<br>', unsafe_allow_html=True)
 
-    # 3. Dryer Zones (เหมือนกันทั้ง NB1 และ NB2)
     dry_chs = [ch for ch in active_channels if ch[0] in ['CH016','CH017']]
     fig_dry = render_single_chart(data, dry_chs, COLORS_DRY, f'Dryer Zones Temperature ({machine_type})', [150, 400], '°C')
     if fig_dry: st.plotly_chart(fig_dry, use_container_width=True, theme="streamlit")
     st.markdown('<br>', unsafe_allow_html=True)
     
-    # 4. & 5. O2, N2, Dew Point (แยกตามประเภทเครื่อง)
     if machine_type == 'NB2':
-        # NB2: แสดง O2 อย่างเดียว (4 กราฟ)
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH018']]
         fig_o2 = render_single_chart(data, o2_chs, COLORS_O2_NB2, 'O2 Concentration Level', [0, 150], 'ppm')
         if fig_o2: st.plotly_chart(fig_o2, use_container_width=True, theme="streamlit")
         
     else:
-        # NB1: แสดง O2 + N2 (Dual Axis) และ Dew point (5 กราฟ)
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH019']]
         n2_chs = [ch for ch in active_channels if ch[0] == 'CH018']
         
