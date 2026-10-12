@@ -136,7 +136,7 @@ system_css = """
 """
 
 # ==========================================
-# 3. Sidebar UI (แผงควบคุมหลักด้านซ้าย)
+# 3. Sidebar UI
 # ==========================================
 with st.sidebar:
     st.header("⚙️ แผงควบคุม (Controls)")
@@ -178,11 +178,11 @@ file_names_placeholder = st.empty()
 st.markdown("---")
 
 # ==========================================
-# 5. DAD Parser Logic (แก้ปัญหาวันที่/ปีผิด + ดึงเฉพาะค่า MAX)
+# 5. Robust DAD Parser Logic
 # ==========================================
 def extract_date_from_filename(filename):
-    """ ถอดรหัสวันที่จากชื่อไฟล์ Yokogawa เช่น 032229_260917_203440.DAD -> 2026-09-17 """
-    match = re.search(r'_(\d{2})(\d{2})(\d{2})_', filename)
+    """ ถอดรหัสวันที่จากชื่อไฟล์ เช่น 028612_DATA0260826_141710.DAD หรือ 032229_260917_203440.DAD """
+    match = re.search(r'(\d{2})(\d{2})(\d{2})_', filename)
     if match:
         yr, mo, dy = int(match.group(1)), int(match.group(2)), int(match.group(3))
         if 1 <= mo <= 12 and 1 <= dy <= 31:
@@ -190,59 +190,58 @@ def extract_date_from_filename(filename):
             return full_yr, mo, dy
     return None
 
-def find_dad_params(raw, machine_type):
-    default_rs = 88 if machine_type == "NB1" else 84
-    default_offset = 15008
-    if default_offset + default_rs * 2 < len(raw):
-        yr, mo, dy, hr, mn, sc = raw[default_offset:default_offset+6]
+def find_dad_params(raw):
+    """ สแกนหา Offset และ Record Size ที่ถูกต้องภายในไฟล์ .DAD """
+    max_search = min(35000, len(raw) - 100)
+    for offset in range(10000, max_search):
+        yr, mo, dy, hr, mn, sc = raw[offset:offset+6]
         if 0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59:
-            return default_offset, default_rs, (default_rs - 8) // 4
-            
-    max_search = min(30000, len(raw) - 200)
-    for offset in range(14000, max_search):
-        yr, mo, dy, hr, mn, sc = raw[offset], raw[offset+1], raw[offset+2], raw[offset+3], raw[offset+4], raw[offset+5]
-        if 0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59:
-            for rs in [88, 84, 92, 80, 96]:
-                if offset + rs + 5 < len(raw):
-                    yr2, mo2, dy2 = raw[offset+rs], raw[offset+rs+1], raw[offset+rs+2]
-                    if 0 <= yr2 <= 99 and 1 <= mo2 <= 12 and 1 <= dy2 <= 31:
-                        return offset, rs, (rs - 8) // 4
-    return default_offset, default_rs, (default_rs - 8) // 4
+            for rs in [88, 84, 92, 96, 80, 100, 128]:
+                if offset + rs + 6 < len(raw):
+                    yr2, mo2, dy2, hr2, mn2, sc2 = raw[offset+rs:offset+rs+6]
+                    if 0 <= yr2 <= 99 and 1 <= mo2 <= 12 and 1 <= dy2 <= 31 and 0 <= hr2 <= 23:
+                        num_ch = (rs - 8) // 4
+                        return offset, rs, num_ch
+    return 15008, 88, 20
 
-@st.cache_data(show_spinner="⏳ กำลังประมวลผลไฟล์ .DAD (ถอดรหัสปีและค่า MAX)...")
+@st.cache_data(show_spinner="⏳ กำลังประมวลผลไฟล์ .DAD...")
 def parse_dad_to_df(files_data):
     all_records = []
-    machine_type = "Unknown"
+    machine_type = "NB1"
     
     for fname, raw in files_data:
-        if "_DATA" in fname.upper():
+        if "DATA" in fname.upper() or "_NB2" in fname.upper():
             machine_type = "NB2"
-        else:
-            machine_type = "NB1"
             
         file_date_hint = extract_date_from_filename(fname)
-        offset, record_size, num_ch = find_dad_params(raw, machine_type)
+        offset, record_size, num_ch = find_dad_params(raw)
+        
         body_len = len(raw) - offset
-        if body_len <= 0: continue
+        if body_len <= 0:
+            continue
         total = body_len // record_size
         
         for i in range(total):
             base = offset + i * record_size
             hdr = raw[base:base+8]
-            if len(hdr) < 8: break
+            if len(hdr) < 8:
+                break
             yr, mo, dy, hr, mn, sc = hdr[0], hdr[1], hdr[2], hdr[3], hdr[4], hdr[5]
             
             if not (0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59):
                 continue
                 
-            # ล็อกการอ่านปี ค.ศ. ให้ถูกต้องตามชื่อไฟล์และสเปก Yokogawa
             if file_date_hint:
-                full_year, mo, dy = file_date_hint
+                full_year, mo_h, dy_h = file_date_hint
+                # ใช้วันที่ตาม Header หากข้อมูลถูกต้อง แต่ใช้อ้างอิงปี
+                mo_val = mo if 1 <= mo <= 12 else mo_h
+                dy_val = dy if 1 <= dy <= 31 else dy_h
             else:
                 full_year = (2000 + yr) if yr < 80 else (1900 + yr)
+                mo_val, dy_val = mo, dy
                     
             try:
-                ts = datetime(full_year, mo, dy, hr, mn, sc)
+                ts = datetime(full_year, mo_val, dy_val, hr, mn, sc)
             except ValueError:
                 continue
                 
@@ -250,14 +249,16 @@ def parse_dad_to_df(files_data):
             valid_data = False
             for ci in range(min(num_ch, 40)): 
                 data_pos = base + 8 + ci*4
-                if data_pos + 4 > len(raw): break
+                if data_pos + 4 > len(raw):
+                    break
                 
-                # 🎯 อ่านค่า MAX (2 ไบต์หลัง)
+                # อ่านค่า Max Value (2-byte signed integer)
                 max_v = struct.unpack_from('>h', raw, data_pos + 2)[0]
                 
-                if max_v not in (-32768, -32767, 32767) and (-30000 < max_v < 30000):
+                # กรองค่า Null/Out-of-range
+                if max_v not in (-32768, -32767, 32767, 32766) and (-30000 < max_v < 30000):
                     val = max_v / 10.0
-                    if -100.0 <= val <= 2000.0:
+                    if -100.0 <= val <= 2500.0:
                         rec[f'CH{(ci+1):03d}'] = val
                         valid_data = True
                     else:
@@ -272,9 +273,11 @@ def parse_dad_to_df(files_data):
     if not df.empty:
         df = df.drop_duplicates(subset=["DateTime"]).sort_values("DateTime").reset_index(drop=True)
         
-        # 🟢 Map Channel ตามสเปกรูปภาพของ NB1 และ NB2
-        for i in range(1, 8): df[f"Top Zone #{i}"] = df.get(f"CH{i:03d}")        # CH001-CH007
-        for i in range(1, 8): df[f"Bottom Zone #{i}"] = df.get(f"CH{(i+7):03d}")  # CH008-CH014
+        # Mapping Channel ตามมาตรฐานเตา NB1 / NB2
+        for i in range(1, 8): 
+            df[f"Top Zone #{i}"] = df.get(f"CH{i:03d}")
+        for i in range(1, 8): 
+            df[f"Bottom Zone #{i}"] = df.get(f"CH{(i+7):03d}")
         
         df["EXIT O2"] = df.get("CH015")
         df["Dryer #1"] = df.get("CH016")
@@ -296,7 +299,7 @@ def parse_dad_to_df(files_data):
 # ==========================================
 # 6. Industrial Style & Chart Creator
 # ==========================================
-def apply_industrial_style(fig, y_title, theme_mode, is_dual_axis=False):
+def apply_industrial_style(fig, y_title, theme_mode):
     t_bg = "#161b22" if theme_mode == "Dark" else "#ffffff" if theme_mode == "Bright" else "rgba(0,0,0,0)"
     t_paper = "#0e1117" if theme_mode == "Dark" else "#f4f6f9" if theme_mode == "Bright" else "rgba(0,0,0,0)"
     t_font = "#ffffff" if theme_mode == "Dark" else "#1a1a1a" if theme_mode == "Bright" else "gray"
@@ -309,10 +312,10 @@ def apply_industrial_style(fig, y_title, theme_mode, is_dual_axis=False):
         hovermode="x unified",
         showlegend=True,
         legend=dict(
-            font=dict(color=t_font, size=12, family="Arial Bold"),
+            font=dict(color=t_font, size=11),
             bgcolor="rgba(128, 128, 128, 0.1)",
             bordercolor=t_line,
-            borderwidth=1.5,
+            borderwidth=1,
             orientation="v",
             yanchor="top",
             y=1,
@@ -334,6 +337,7 @@ def apply_industrial_style(fig, y_title, theme_mode, is_dual_axis=False):
             gridcolor=t_grid,
             zeroline=False,
             linecolor=t_line,
+            autorange=True # ปรับ Auto-range ให้ปรับแกนตามข้อมูลจริงอัตโนมัติ
         ),
         height=480, 
     )
@@ -348,53 +352,52 @@ def create_unified_figure(df, machine_type, initial_idx, theme_mode):
     bottom_colors = ["#00FFFF", "#FF1493", "#808080", "#00FF00", "#008000", "#0000FF", "#8A2BE2"]
 
     for i in range(1, 8):
-        fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get(f"Top Zone #{i}"), name=f"Top Z#{i} (CH{i:03d})", mode="lines", line=dict(color=top_colors[i-1], width=2), visible=(initial_idx==0)), secondary_y=False)
+        fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get(f"Top Zone #{i}"), name=f"Top Z#{i} (CH{i:03d})", mode="lines", line=dict(color=top_colors[i-1], width=1.8), visible=(initial_idx==0)), secondary_y=False)
         traces_info.append(0)
 
     for i in range(1, 8):
         ch_num = 7 + i
-        fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get(f"Bottom Zone #{i}"), name=f"Bottom Z#{i} (CH{ch_num:03d})", mode="lines", line=dict(color=bottom_colors[i-1], width=2), visible=(initial_idx==1)), secondary_y=False)
+        fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get(f"Bottom Zone #{i}"), name=f"Bottom Z#{i} (CH{ch_num:03d})", mode="lines", line=dict(color=bottom_colors[i-1], width=1.8), visible=(initial_idx==1)), secondary_y=False)
         traces_info.append(1)
 
-    fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("Dryer #1"), name="Dryer #1 (CH016)", mode="lines", line=dict(color="#FFA500", width=2), visible=(initial_idx==2)), secondary_y=False)
+    fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("Dryer #1"), name="Dryer #1 (CH016)", mode="lines", line=dict(color="#FFA500", width=1.8), visible=(initial_idx==2)), secondary_y=False)
     traces_info.append(2)
-    fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("Dryer #2"), name="Dryer #2 (CH017)", mode="lines", line=dict(color="#9ACD32", width=2), visible=(initial_idx==2)), secondary_y=False)
+    fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("Dryer #2"), name="Dryer #2 (CH017)", mode="lines", line=dict(color="#9ACD32", width=1.8), visible=(initial_idx==2)), secondary_y=False)
     traces_info.append(2)
 
     ent_ch = "CH019" if machine_type == "NB1" else "CH018"
-    fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("ENTRANCE O2"), name=f"ENTRANCE O2 ({ent_ch})", mode="lines", line=dict(color="#FF80FF", width=2), visible=(initial_idx==3)), secondary_y=False)
+    fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("ENTRANCE O2"), name=f"ENTRANCE O2 ({ent_ch})", mode="lines", line=dict(color="#FF80FF", width=1.8), visible=(initial_idx==3)), secondary_y=False)
     traces_info.append(3)
-    fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("EXIT O2"), name="EXIT O2 (CH015)", mode="lines", line=dict(color="#A52A2A", width=2), visible=(initial_idx==3)), secondary_y=False)
+    fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("EXIT O2"), name="EXIT O2 (CH015)", mode="lines", line=dict(color="#A52A2A", width=1.8), visible=(initial_idx==3)), secondary_y=False)
     traces_info.append(3)
 
     if machine_type == "NB1" and "N2 Flow" in df.columns:
-        fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("N2 Flow"), name="N2 Flow (CH018)", mode="lines", line=dict(color="#ADD8E6", width=2), visible=(initial_idx==3)), secondary_y=True)
+        fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("N2 Flow"), name="N2 Flow (CH018)", mode="lines", line=dict(color="#ADD8E6", width=1.8), visible=(initial_idx==3)), secondary_y=True)
         traces_info.append(3)
 
     if machine_type == "NB1" and "DEW POINT" in df.columns:
-        fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("DEW POINT"), name="Dew Point (CH020)", mode="lines", line=dict(color="#00ecff", width=2), visible=(initial_idx==4)), secondary_y=False)
+        fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("DEW POINT"), name="Dew Point (CH020)", mode="lines", line=dict(color="#00ecff", width=1.8), visible=(initial_idx==4)), secondary_y=False)
         traces_info.append(4)
 
     buttons = []
-    buttons.append(dict(label="1. Top Zone", method="update", args=[{"visible": [t == 0 for t in traces_info]}, {"title.text": "<b>1. Brazing zone Top #1-#7 (CH001-CH007)</b>", "yaxis.title.text": "Temperature (°C)", "yaxis.range": [550, 650], "yaxis2.visible": False}]))
-    buttons.append(dict(label="2. Bottom Zone", method="update", args=[{"visible": [t == 1 for t in traces_info]}, {"title.text": "<b>2. Brazing zone Bottom #1-#7 (CH008-CH014)</b>", "yaxis.title.text": "Temperature (°C)", "yaxis.range": [550, 650], "yaxis2.visible": False}]))
-    buttons.append(dict(label="3. Dryer", method="update", args=[{"visible": [t == 2 for t in traces_info]}, {"title.text": "<b>3. Dryer #1 & #2 (CH016 & CH017)</b>", "yaxis.title.text": "Temperature (°C)", "yaxis.range": [150, 350], "yaxis2.visible": False}]))
+    buttons.append(dict(label="1. Top Zone", method="update", args=[{"visible": [t == 0 for t in traces_info]}, {"title.text": "<b>1. Brazing zone Top #1-#7 (CH001-CH007)</b>", "yaxis.title.text": "Temperature (°C)", "yaxis.autorange": True, "yaxis2.visible": False}]))
+    buttons.append(dict(label="2. Bottom Zone", method="update", args=[{"visible": [t == 1 for t in traces_info]}, {"title.text": "<b>2. Brazing zone Bottom #1-#7 (CH008-CH014)</b>", "yaxis.title.text": "Temperature (°C)", "yaxis.autorange": True, "yaxis2.visible": False}]))
+    buttons.append(dict(label="3. Dryer", method="update", args=[{"visible": [t == 2 for t in traces_info]}, {"title.text": "<b>3. Dryer #1 & #2 (CH016 & CH017)</b>", "yaxis.title.text": "Temperature (°C)", "yaxis.autorange": True, "yaxis2.visible": False}]))
     
-    title_o2 = "<b>4. ppmO2 Entry/Exit & N2 Flow (CH015, CH018, CH019)</b>" if machine_type == "NB1" else "<b>4. ppmO2 Entry/Exit (CH015, CH018)</b>"
-    buttons.append(dict(label="4. O2/N2", method="update", args=[{"visible": [t == 3 for t in traces_info]}, {"title.text": title_o2, "yaxis.title.text": "Oxygen Level (ppm) [0-200]", "yaxis.range": [0, 200], "yaxis2.visible": (machine_type == "NB1")}]))
+    title_o2 = "<b>4. ppmO2 Entry/Exit & N2 Flow</b>" if machine_type == "NB1" else "<b>4. ppmO2 Entry/Exit</b>"
+    buttons.append(dict(label="4. O2/N2", method="update", args=[{"visible": [t == 3 for t in traces_info]}, {"title.text": title_o2, "yaxis.title.text": "Oxygen Level (ppm)", "yaxis.autorange": True, "yaxis2.visible": (machine_type == "NB1")}]))
 
     if machine_type == "NB1":
-        buttons.append(dict(label="5. Dew Point", method="update", args=[{"visible": [t == 4 for t in traces_info]}, {"title.text": "<b>5. Dew point 'Cdp (CH020)</b>", "yaxis.title.text": "Dew Point (°Cdp)", "yaxis.range": [-100, 10], "yaxis2.visible": False}]))
+        buttons.append(dict(label="5. Dew Point", method="update", args=[{"visible": [t == 4 for t in traces_info]}, {"title.text": "<b>5. Dew point °Cdp (CH020)</b>", "yaxis.title.text": "Dew Point (°Cdp)", "yaxis.autorange": True, "yaxis2.visible": False}]))
 
     btn_bg = "rgba(22, 27, 34, 0.8)" if theme_mode == "Dark" else "rgba(255, 255, 255, 0.9)" if theme_mode == "Bright" else "rgba(128, 128, 128, 0.2)"
     btn_font = "#FFFFFF" if theme_mode == "Dark" else "#0056b3" if theme_mode == "Bright" else "gray"
     btn_border = "rgba(240, 185, 11, 0.5)" if theme_mode == "Dark" else "rgba(0, 86, 179, 0.5)" if theme_mode == "Bright" else "rgba(128, 128, 128, 0.5)"
 
-    title_font_color = apply_industrial_style(fig, "Temperature (°C)", theme_mode, is_dual_axis=True)
+    title_font_color = apply_industrial_style(fig, "Temperature (°C)", theme_mode)
     
     initial_title = buttons[initial_idx]["args"][1]["title.text"]
     initial_y_title = buttons[initial_idx]["args"][1]["yaxis.title.text"]
-    initial_y_range = buttons[initial_idx]["args"][1].get("yaxis.range", None)
     initial_y2_visible = buttons[initial_idx]["args"][1]["yaxis2.visible"]
 
     fig.update_layout(
@@ -409,7 +412,7 @@ def create_unified_figure(df, machine_type, initial_idx, theme_mode):
             yanchor="top"
         ),
         margin=dict(l=60, r=100, t=130, b=40), 
-        yaxis=dict(title=dict(text=initial_y_title), range=initial_y_range),
+        yaxis=dict(title=dict(text=initial_y_title), autorange=True),
         yaxis2=dict(
             title=dict(text="N2 Flow Rate (m3/Hr)", font=dict(color="#ADD8E6", size=12)),
             tickfont=dict(color="#ADD8E6", size=10),
@@ -445,7 +448,7 @@ if uploaded_files:
     try:
         detected_types = set()
         for f in uploaded_files:
-            if "_DATA" in f.name.upper():
+            if "DATA" in f.name.upper() or "_NB2" in f.name.upper():
                 detected_types.add("NB2")
             else:
                 detected_types.add("NB1")
@@ -458,7 +461,7 @@ if uploaded_files:
         df, detected_machine = parse_dad_to_df(files_data)
         
         if df.empty:
-            st.warning("⚠️ ไม่พบข้อมูลที่สามารถอ่านได้ในไฟล์ที่อัปโหลด")
+            st.warning("⚠️ ไม่พบข้อมูลที่สามารถอ่านได้ในไฟล์ที่อัปโหลด กรุณาตรวจสอบรูปแบบไฟล์ .DAD")
             st.stop()
             
         title_placeholder.title(f"🏭 Recorder {detected_machine} Furnace from YOKOGAWA (.DAD Data)")
