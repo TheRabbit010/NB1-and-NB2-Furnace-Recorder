@@ -45,7 +45,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Constants & Configuration ─────────────────────────────────────────────────
-# NB1 Channels
+# NB1 Channels (อ้างอิงจากภาพล่าสุด)
 CH_NB1 = [
     ('CH001', 'Top Z#1',       '°C'),
     ('CH002', 'Top Z#2',       '°C'),
@@ -448,7 +448,6 @@ with tab_chart:
     
     if machine_type == 'NB2':
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH018']]
-        # ── ปรับ Scale แกน Y ของ O2 เป็น 0 ถึง 1000 ppm ตามข้อมูลจริง ──
         fig_o2 = render_single_chart(data, o2_chs, COLORS_O2_NB2, 'O2 Concentration Level', [0, 1000], 'ppm')
         if fig_o2: st.plotly_chart(fig_o2, use_container_width=True, theme="streamlit")
         
@@ -456,7 +455,6 @@ with tab_chart:
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH019']]
         n2_chs = [ch for ch in active_channels if ch[0] == 'CH018']
         
-        # ── ปรับ Scale แกน Y ของ O2 เป็น 0 ถึง 1000 ppm ──
         fig_o2_n2 = render_dual_axis_chart(
             data, o2_chs, n2_chs, 
             COLORS_O2_NB1, COLORS_N2, 
