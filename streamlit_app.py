@@ -8,50 +8,26 @@ import io
 import re
 
 # ==========================================
-# 1. Page Config Setup
+# 1. Page Config & Default Setup
 # ==========================================
 st.set_page_config(
     page_title="Recorder Furnace YOKOGAWA (.DAD)",
     page_icon="🏭",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded" # บังคับให้ Sidebar กางออกเสมอ
 )
 
+# สร้าง Session State สำหรับเก็บคีย์ของ File Uploader
 if "dad_uploader_key" not in st.session_state:
     st.session_state["dad_uploader_key"] = 0
 
 # ==========================================
-# 2. CSS Injector (ระบบจัดการ UI & Theme)
+# 2. CSS Injector (ระบบจัดการ Theme และ UI)
 # ==========================================
 st.markdown("""
     <style>
-        [data-testid="stAppDeployButton"], #MainMenu { 
-            display: none !important; 
-        }
-        [data-testid="stHeader"] { 
-            background-color: transparent !important; 
-            z-index: 1000001 !important;
-        }
-        [data-testid="collapsedControl"], button[kind="header"] {
-            background-color: #21262d !important;
-            color: #F0B90B !important;
-            border: 1.5px solid #F0B90B !important;
-            border-radius: 6px !important;
-            margin: 10px !important;
-            z-index: 1000002 !important;
-            display: flex !important;
-        }
-        [data-testid="collapsedControl"] svg, button[kind="header"] svg {
-            fill: #F0B90B !important;
-        }
-        section[data-testid="stSidebar"] {
-            background-color: #161b22 !important;
-            border-right: 2px solid #F0B90B !important;
-            z-index: 1000000 !important;
-        }
-        [data-testid="stSidebarHeader"] {
-            background-color: #161b22 !important;
-        }
+        [data-testid="stHeader"] { background-color: transparent !important; }
+        [data-testid="stToolbar"], #MainMenu, .stAppDeployButton { display: none !important; } 
     </style>
 """, unsafe_allow_html=True)
 
@@ -61,7 +37,11 @@ dark_css = """
         background-color: #0e1117 !important; 
         color: #ffffff !important; 
     }
+    [data-testid="stSidebar"], [data-testid="stSidebarHeader"] { background-color: #161b22 !important; }
     .stMarkdown, h1, h2, h3, h4, h5, h6, p, span, label { color: #ffffff !important; }
+    
+    button[kind="header"], [data-testid="collapsedControl"] { color: #F0B90B !important; }
+    button[kind="header"] svg, [data-testid="collapsedControl"] svg { fill: #F0B90B !important; }
 
     div.stButton > button, [data-testid="stDownloadButton"] > button {
         background-color: #21262d !important;
@@ -98,7 +78,11 @@ bright_css = """
         background-color: #f4f6f9 !important; 
         color: #1a1a1a !important; 
     }
+    [data-testid="stSidebar"], [data-testid="stSidebarHeader"] { background-color: #e9ecef !important; }
     .stMarkdown, h1, h2, h3, h4, h5, h6, p, span, label { color: #1a1a1a !important; }
+    
+    button[kind="header"], [data-testid="collapsedControl"] { color: #0056b3 !important; }
+    button[kind="header"] svg, [data-testid="collapsedControl"] svg { fill: #0056b3 !important; }
 
     div.stButton > button, [data-testid="stDownloadButton"] > button {
         background-color: #ffffff !important;
@@ -136,7 +120,7 @@ system_css = """
 """
 
 # ==========================================
-# 3. Sidebar UI
+# 3. Sidebar UI (แผงควบคุมหลักด้านซ้าย)
 # ==========================================
 with st.sidebar:
     st.header("⚙️ แผงควบคุม (Controls)")
@@ -165,23 +149,18 @@ else:
     st.markdown(system_css, unsafe_allow_html=True)
 
 # ==========================================
-# 4. Main UI Header
+# 4. Main UI (หน้าจอหลักแสดงผลกราฟ)
 # ==========================================
-credit_color = "#8b949e" if theme_choice == "Dark" else "#6c757d" if theme_choice == "Bright" else "gray"
-
 title_placeholder = st.empty()
-title_placeholder.title("🏭 Recorder NB1 and NB2 Furnace from YOKOGAWA (.DAD Data)")
-
-st.markdown(f"<p style='color: {credit_color}; font-size: 0.88rem; margin-top: -15px; margin-bottom: 15px;'><i>Wichien Laithanakit - Brazing Engineer - VSTS / Power Chonburi</i></p>", unsafe_allow_html=True)
-
+title_placeholder.title("🏭 Recorder Furnace from YOKOGAWA (.DAD Data)")
 file_names_placeholder = st.empty() 
 st.markdown("---")
 
 # ==========================================
-# 5. Robust DAD Parser Logic
+# 5. DAD Parser Logic (แก้ไขเพื่อไฟล์ 028613 ให้แม่นยำขึ้น)
 # ==========================================
 def extract_date_from_filename(filename):
-    """ ถอดรหัสวันที่จากชื่อไฟล์ เช่น 028612_DATA0260826_141710.DAD หรือ 032229_260917_203440.DAD """
+    """ ถอดรหัสวันที่จากชื่อไฟล์เพื่อใช้เป็นตัวกรอง """
     match = re.search(r'(\d{2})(\d{2})(\d{2})_', filename)
     if match:
         yr, mo, dy = int(match.group(1)), int(match.group(2)), int(match.group(3))
@@ -191,15 +170,19 @@ def extract_date_from_filename(filename):
     return None
 
 def find_dad_params(raw):
-    """ สแกนหา Offset และ Record Size ที่ถูกต้องภายในไฟล์ .DAD """
-    max_search = min(35000, len(raw) - 100)
+    """ สแกนหา Offset อัจฉริยะ (เช็คซ้ำ 3 Records ป้องกันจับไบต์ผิดตำแหน่ง) """
+    max_search = min(35000, len(raw) - 200)
     for offset in range(10000, max_search):
         yr, mo, dy, hr, mn, sc = raw[offset:offset+6]
         if 0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59:
-            for rs in [88, 84, 92, 96, 80, 100, 128]:
-                if offset + rs + 6 < len(raw):
-                    yr2, mo2, dy2, hr2, mn2, sc2 = raw[offset+rs:offset+rs+6]
-                    if 0 <= yr2 <= 99 and 1 <= mo2 <= 12 and 1 <= dy2 <= 31 and 0 <= hr2 <= 23:
+            # ลองใช้ Record Size มาตรฐานต่างๆ ของ Yokogawa
+            for rs in [84, 88, 92, 96, 80, 100, 128]:
+                if offset + rs*2 + 6 < len(raw):
+                    # ตรวจสอบ Record ที่ 2 และ 3 ล่วงหน้าเพื่อให้แน่ใจว่าไม่ได้จับผิดไบต์ (สาเหตุที่กราฟบางไฟล์แสดงค่าเพี้ยน)
+                    yr2, mo2, dy2, hr2, mn2, sc2 = raw[offset+rs : offset+rs+6]
+                    yr3, mo3, dy3, hr3, mn3, sc3 = raw[offset+rs*2 : offset+rs*2+6]
+                    if (0 <= yr2 <= 99 and 1 <= mo2 <= 12 and 1 <= dy2 <= 31 and 0 <= hr2 <= 23) and \
+                       (0 <= yr3 <= 99 and 1 <= mo3 <= 12 and 1 <= dy3 <= 31 and 0 <= hr3 <= 23):
                         num_ch = (rs - 8) // 4
                         return offset, rs, num_ch
     return 15008, 88, 20
@@ -217,31 +200,28 @@ def parse_dad_to_df(files_data):
         offset, record_size, num_ch = find_dad_params(raw)
         
         body_len = len(raw) - offset
-        if body_len <= 0:
-            continue
+        if body_len <= 0: continue
         total = body_len // record_size
         
         for i in range(total):
             base = offset + i * record_size
             hdr = raw[base:base+8]
-            if len(hdr) < 8:
-                break
+            if len(hdr) < 8: break
             yr, mo, dy, hr, mn, sc = hdr[0], hdr[1], hdr[2], hdr[3], hdr[4], hdr[5]
             
             if not (0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59):
                 continue
                 
+            parsed_yr = (2000 + yr) if yr < 80 else (1900 + yr)
+            
+            # บังคับปีให้ตรงกับชื่อไฟล์หากข้อมูลในไฟล์เสียหาย
             if file_date_hint:
-                full_year, mo_h, dy_h = file_date_hint
-                # ใช้วันที่ตาม Header หากข้อมูลถูกต้อง แต่ใช้อ้างอิงปี
-                mo_val = mo if 1 <= mo <= 12 else mo_h
-                dy_val = dy if 1 <= dy <= 31 else dy_h
-            else:
-                full_year = (2000 + yr) if yr < 80 else (1900 + yr)
-                mo_val, dy_val = mo, dy
+                h_yr, h_mo, h_dy = file_date_hint
+                if abs(parsed_yr - h_yr) > 5:
+                    parsed_yr = h_yr
                     
             try:
-                ts = datetime(full_year, mo_val, dy_val, hr, mn, sc)
+                ts = datetime(parsed_yr, mo, dy, hr, mn, sc)
             except ValueError:
                 continue
                 
@@ -249,13 +229,12 @@ def parse_dad_to_df(files_data):
             valid_data = False
             for ci in range(min(num_ch, 40)): 
                 data_pos = base + 8 + ci*4
-                if data_pos + 4 > len(raw):
-                    break
+                if data_pos + 4 > len(raw): break
                 
-                # อ่านค่า Max Value (2-byte signed integer)
+                # อ่านเฉพาะค่า MAX (ข้าม MIN) ตามมาตรฐาน Yokogawa DAQ
                 max_v = struct.unpack_from('>h', raw, data_pos + 2)[0]
                 
-                # กรองค่า Null/Out-of-range
+                # กรองค่าขยะ และ error bytes
                 if max_v not in (-32768, -32767, 32767, 32766) and (-30000 < max_v < 30000):
                     val = max_v / 10.0
                     if -100.0 <= val <= 2500.0:
@@ -273,11 +252,9 @@ def parse_dad_to_df(files_data):
     if not df.empty:
         df = df.drop_duplicates(subset=["DateTime"]).sort_values("DateTime").reset_index(drop=True)
         
-        # Mapping Channel ตามมาตรฐานเตา NB1 / NB2
-        for i in range(1, 8): 
-            df[f"Top Zone #{i}"] = df.get(f"CH{i:03d}")
-        for i in range(1, 8): 
-            df[f"Bottom Zone #{i}"] = df.get(f"CH{(i+7):03d}")
+        # จัด Map Channels
+        for i in range(1, 8): df[f"Top Zone #{i}"] = df.get(f"CH{i:03d}")
+        for i in range(1, 8): df[f"Bottom Zone #{i}"] = df.get(f"CH{i+7:03d}")
         
         df["EXIT O2"] = df.get("CH015")
         df["Dryer #1"] = df.get("CH016")
@@ -292,19 +269,30 @@ def parse_dad_to_df(files_data):
             df["N2 Flow"] = None
             df["DEW POINT"] = None
             
-        df = df.sort_values("DateTime").reset_index(drop=True)
-        
     return df, machine_type
 
 # ==========================================
-# 6. Industrial Style & Chart Creator
+# 6. ฟังก์ชันสร้างกราฟอัจฉริยะแบบปรับสีตาม Theme
 # ==========================================
-def apply_industrial_style(fig, y_title, theme_mode):
-    t_bg = "#161b22" if theme_mode == "Dark" else "#ffffff" if theme_mode == "Bright" else "rgba(0,0,0,0)"
-    t_paper = "#0e1117" if theme_mode == "Dark" else "#f4f6f9" if theme_mode == "Bright" else "rgba(0,0,0,0)"
-    t_font = "#ffffff" if theme_mode == "Dark" else "#1a1a1a" if theme_mode == "Bright" else "gray"
-    t_grid = "rgba(255,255,255,0.08)" if theme_mode == "Dark" else "rgba(0,0,0,0.1)"
-    t_line = "#555555" if theme_mode == "Dark" else "#cccccc"
+def apply_industrial_style(fig, y_title, theme_mode, is_dual_axis=False):
+    if theme_mode == "Dark":
+        t_bg = "#161b22"
+        t_paper = "#0e1117"
+        t_font = "#ffffff"
+        t_grid = "rgba(255,255,255,0.08)"
+        t_line = "#555555"
+    elif theme_mode == "Bright":
+        t_bg = "#ffffff"
+        t_paper = "#f4f6f9"
+        t_font = "#1a1a1a"
+        t_grid = "rgba(0,0,0,0.1)"
+        t_line = "#cccccc"
+    else: 
+        t_bg = "rgba(0,0,0,0)"
+        t_paper = "rgba(0,0,0,0)"
+        t_font = "gray"
+        t_grid = "rgba(128,128,128,0.2)"
+        t_line = "gray"
 
     layout_args = dict(
         plot_bgcolor=t_bg,
@@ -312,7 +300,7 @@ def apply_industrial_style(fig, y_title, theme_mode):
         hovermode="x unified",
         showlegend=True,
         legend=dict(
-            font=dict(color=t_font, size=11),
+            font=dict(color=t_font, size=11, family="Arial Bold"),
             bgcolor="rgba(128, 128, 128, 0.1)",
             bordercolor=t_line,
             borderwidth=1,
@@ -337,7 +325,7 @@ def apply_industrial_style(fig, y_title, theme_mode):
             gridcolor=t_grid,
             zeroline=False,
             linecolor=t_line,
-            autorange=True # ปรับ Auto-range ให้ปรับแกนตามข้อมูลจริงอัตโนมัติ
+            autorange=True # เปิดให้ปรับ Scale Auto
         ),
         height=480, 
     )
@@ -379,6 +367,7 @@ def create_unified_figure(df, machine_type, initial_idx, theme_mode):
         fig.add_trace(go.Scatter(x=df["DateTime"], y=df.get("DEW POINT"), name="Dew Point (CH020)", mode="lines", line=dict(color="#00ecff", width=1.8), visible=(initial_idx==4)), secondary_y=False)
         traces_info.append(4)
 
+    # เปลี่ยนจากการยึด yaxis.range ค้างไว้ เป็น yaxis.autorange = True
     buttons = []
     buttons.append(dict(label="1. Top Zone", method="update", args=[{"visible": [t == 0 for t in traces_info]}, {"title.text": "<b>1. Brazing zone Top #1-#7 (CH001-CH007)</b>", "yaxis.title.text": "Temperature (°C)", "yaxis.autorange": True, "yaxis2.visible": False}]))
     buttons.append(dict(label="2. Bottom Zone", method="update", args=[{"visible": [t == 1 for t in traces_info]}, {"title.text": "<b>2. Brazing zone Bottom #1-#7 (CH008-CH014)</b>", "yaxis.title.text": "Temperature (°C)", "yaxis.autorange": True, "yaxis2.visible": False}]))
@@ -390,11 +379,20 @@ def create_unified_figure(df, machine_type, initial_idx, theme_mode):
     if machine_type == "NB1":
         buttons.append(dict(label="5. Dew Point", method="update", args=[{"visible": [t == 4 for t in traces_info]}, {"title.text": "<b>5. Dew point °Cdp (CH020)</b>", "yaxis.title.text": "Dew Point (°Cdp)", "yaxis.autorange": True, "yaxis2.visible": False}]))
 
-    btn_bg = "rgba(22, 27, 34, 0.8)" if theme_mode == "Dark" else "rgba(255, 255, 255, 0.9)" if theme_mode == "Bright" else "rgba(128, 128, 128, 0.2)"
-    btn_font = "#FFFFFF" if theme_mode == "Dark" else "#0056b3" if theme_mode == "Bright" else "gray"
-    btn_border = "rgba(240, 185, 11, 0.5)" if theme_mode == "Dark" else "rgba(0, 86, 179, 0.5)" if theme_mode == "Bright" else "rgba(128, 128, 128, 0.5)"
+    if theme_mode == "Dark":
+        btn_bg = "rgba(22, 27, 34, 0.8)"
+        btn_font = "#FFFFFF"
+        btn_border = "rgba(240, 185, 11, 0.5)"
+    elif theme_mode == "Bright":
+        btn_bg = "rgba(255, 255, 255, 0.9)"
+        btn_font = "#0056b3"
+        btn_border = "rgba(0, 86, 179, 0.5)"
+    else:
+        btn_bg = "rgba(128, 128, 128, 0.2)"
+        btn_font = "gray"
+        btn_border = "rgba(128, 128, 128, 0.5)"
 
-    title_font_color = apply_industrial_style(fig, "Temperature (°C)", theme_mode)
+    title_font_color = apply_industrial_style(fig, "Temperature (°C)", theme_mode, is_dual_axis=True)
     
     initial_title = buttons[initial_idx]["args"][1]["title.text"]
     initial_y_title = buttons[initial_idx]["args"][1]["yaxis.title.text"]
@@ -461,7 +459,7 @@ if uploaded_files:
         df, detected_machine = parse_dad_to_df(files_data)
         
         if df.empty:
-            st.warning("⚠️ ไม่พบข้อมูลที่สามารถอ่านได้ในไฟล์ที่อัปโหลด กรุณาตรวจสอบรูปแบบไฟล์ .DAD")
+            st.warning("⚠️ ไม่พบข้อมูลที่สามารถอ่านได้ในไฟล์ที่อัปโหลด หรือข้อมูลเสียหาย")
             st.stop()
             
         title_placeholder.title(f"🏭 Recorder {detected_machine} Furnace from YOKOGAWA (.DAD Data)")
@@ -470,8 +468,9 @@ if uploaded_files:
         subtext_color = "#a0aab2" if theme_choice == "Dark" else "#666666" if theme_choice == "Bright" else "gray"
         file_names_placeholder.markdown(f"<span style='color:{subtext_color}; font-size:1.1rem;'><b>📁 File(s):</b> {file_names_str}</span>", unsafe_allow_html=True)
         
-        st.success(f"รวมข้อมูลสำเร็จ {len(uploaded_files)} ไฟล์ ({len(df)} แถว) - โหมด {detected_machine} (ดึงเฉพาะค่า MAX)")
+        st.success(f"รวมข้อมูลสำเร็จ {len(uploaded_files)} ไฟล์ ({len(df)} แถว) - แสดงผลโดยใช้ค่า MAX")
         
+        # สร้างกราฟ
         st.plotly_chart(create_unified_figure(df, detected_machine, 0, theme_choice), use_container_width=True)
         st.plotly_chart(create_unified_figure(df, detected_machine, 1, theme_choice), use_container_width=True)
         st.plotly_chart(create_unified_figure(df, detected_machine, 2, theme_choice), use_container_width=True)
@@ -480,6 +479,9 @@ if uploaded_files:
         if detected_machine == "NB1":
             st.plotly_chart(create_unified_figure(df, detected_machine, 4, theme_choice), use_container_width=True)
 
+        # ==========================================
+        # 8. ส่วนดาวน์โหลดข้อมูล (แสดงใน Sidebar)
+        # ==========================================
         with export_placeholder:
             st.markdown("---")
             st.subheader("💾 ส่งออกข้อมูล (Export Data)")
