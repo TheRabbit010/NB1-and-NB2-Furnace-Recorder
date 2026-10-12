@@ -45,7 +45,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Constants & Configuration ─────────────────────────────────────────────────
-# NB1 Channels
+# NB1 Channels (อ้างอิงจากภาพล่าสุด)
 CH_NB1 = [
     ('CH001', 'Top Z#1',       '°C'),
     ('CH002', 'Top Z#2',       '°C'),
@@ -174,13 +174,12 @@ def parse_dad(raw: bytes, active_channels) -> list:
         records.append(rec)
     return records
 
-# ── Excel Builder (รูปแบบคล้าย YOKOGAWA DAQSTANDARD) ───────────────────────────
+# ── Excel Builder ─────────────────────────────────────────────────────────────
 def build_excel(data, dt_start, dt_end, active_channels, mode_str, machine_type):
     wb = Workbook()
     ws = wb.active
     ws.title = 'Data Viewer'
 
-    # Metadata Header
     ws['A1'] = "YOKOGAWA Recorder Data Analysis Report"
     ws['A1'].font = Font(bold=True, size=12, color='1F4E79')
     
@@ -195,14 +194,12 @@ def build_excel(data, dt_start, dt_end, active_channels, mode_str, machine_type)
     ws['A7'] = "Value Mode"
     ws['B7'] = mode_str
     
-    # Headers styling
     hdr_fill = PatternFill('solid', fgColor='F0F4F8')
     hdr_font = Font(bold=True, size=9)
     norm_font = Font(name='Arial', size=9)
     thin = Side(border_style='thin', color='D0D0D0')
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    # Multi-row headers (Ch., Tag, Unit)
     ws.cell(row=9, column=1, value="Ch.").font = hdr_font
     ws.cell(row=10, column=1, value="Tag").font = hdr_font
     ws.cell(row=11, column=1, value="Unit").font = hdr_font
@@ -223,7 +220,6 @@ def build_excel(data, dt_start, dt_end, active_channels, mode_str, machine_type)
         c.font, c.border, c.fill = hdr_font, border, hdr_fill
         c.alignment = Alignment(horizontal='right')
 
-    # Data Rows
     for ri, rec in enumerate(data, start=13):
         ts = rec['ts']
         ws.cell(row=ri, column=1, value=ts.strftime('%Y/%m/%d')).font = norm_font
@@ -235,7 +231,6 @@ def build_excel(data, dt_start, dt_end, active_channels, mode_str, machine_type)
             c.font = norm_font
             c.number_format = '0.0'
 
-    # Auto-adjust column width
     ws.column_dimensions['A'].width = 12
     ws.column_dimensions['B'].width = 10
     for i in range(len(active_channels)):
@@ -249,7 +244,7 @@ def build_excel(data, dt_start, dt_end, active_channels, mode_str, machine_type)
     return buf.getvalue()
 
 # ── Chart Builder ─────────────────────────────────────────────────────────────
-def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title):
+def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hline=None):
     if not ch_list:
         return None
 
@@ -264,6 +259,18 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title):
             line=dict(color=color, width=1.5),
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>',
         ))
+
+    # เพิ่มเส้นมาตรฐานถ้ามีการระบุ hline
+    if hline is not None:
+        fig.add_hline(
+            y=hline, 
+            line_dash="dash", 
+            line_color="#FF4B4B", 
+            line_width=1.5,
+            annotation_text=f"Standard {hline} {y_title}", 
+            annotation_position="bottom right",
+            annotation_font=dict(color="#FF4B4B", size=12)
+        )
 
     fig.update_layout(
         title=dict(text=title, font=dict(size=18, weight="bold")),
@@ -293,7 +300,7 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title):
     )
     return fig
 
-def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, title, y1_range, y1_title, y2_title):
+def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, title, y1_range, y1_title, y2_title, hline_left=None):
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     ts = [r['ts'] for r in data]
     
@@ -314,6 +321,19 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
             line=dict(color=color, width=1.5, dash='dot'), 
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>',
         ), secondary_y=True)
+
+    # เพิ่มเส้นมาตรฐานให้แกนซ้าย
+    if hline_left is not None:
+        fig.add_hline(
+            y=hline_left, 
+            line_dash="dash", 
+            line_color="#FF4B4B", 
+            line_width=1.5,
+            annotation_text=f"Standard {hline_left} {y1_title.split()[0]}", 
+            annotation_position="bottom right",
+            annotation_font=dict(color="#FF4B4B", size=12),
+            secondary_y=False
+        )
 
     fig.update_layout(
         title=dict(text=title, font=dict(size=18, weight="bold")),
@@ -353,7 +373,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 with st.sidebar:
-    # ── ปุ่มล้างข้อมูลและหยุดการทำงาน ──
     if st.button("🗑️ ล้างข้อมูล / หยุดการทำงานทันที", type="primary", use_container_width=True):
         st.session_state.uploader_key += 1
         st.cache_data.clear()
@@ -362,7 +381,6 @@ with st.sidebar:
     st.markdown('<br>', unsafe_allow_html=True)
     st.markdown('### 📂 Upload ไฟล์ .DAD')
     
-    # ── ใช้ Session State Key ในการรีเซ็ต Uploader ──
     uploaded = st.file_uploader(
         'ลากไฟล์ .DAD มาวางที่นี่ (เลือกได้หลายไฟล์)',
         type=['DAD','dad'],
@@ -392,7 +410,6 @@ def load_data_auto(files_d, mode_k, act_channels):
     for fname, raw in files_d:
         recs = parse_dad(raw, act_channels)
         
-        # ── ตัดข้อมูลขยะ 3 บรรทัดแรก และ 2 บรรทัดสุดท้ายของแต่ละไฟล์ทิ้ง ป้องกันเส้นกราฟตก ──
         if len(recs) > 10:
             all_records.extend(recs[3:-2])
         else:
@@ -402,7 +419,6 @@ def load_data_auto(files_d, mode_k, act_channels):
     
     all_records.sort(key=lambda x: x['ts'])
     
-    # ── กรองข้อมูล Outlier (เวลาเพี้ยน/ข้ามปี) ──
     if len(all_records) > 0:
         mid_ts = all_records[len(all_records) // 2]['ts']
         all_records = [r for r in all_records if abs((r['ts'] - mid_ts).days) <= 30]
@@ -468,18 +484,20 @@ with tab_chart:
     
     if machine_type == 'NB2':
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH018']]
-        fig_o2 = render_single_chart(data, o2_chs, COLORS_O2_NB2, 'O2 Concentration Level', [0, 1000], 'ppm')
+        # ปรับ Range เป็น 0-150 และเพิ่มเส้น Hline ที่ 100
+        fig_o2 = render_single_chart(data, o2_chs, COLORS_O2_NB2, 'O2 Concentration Level', [0, 150], 'ppm', hline=100)
         if fig_o2: st.plotly_chart(fig_o2, use_container_width=True, theme="streamlit")
         
     else:
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH019']]
         n2_chs = [ch for ch in active_channels if ch[0] == 'CH018']
         
+        # ปรับ Range O2 เป็น 0-150 และเพิ่มเส้น Hline ที่ 100
         fig_o2_n2 = render_dual_axis_chart(
             data, o2_chs, n2_chs, 
             COLORS_O2_NB1, COLORS_N2, 
             'O2 Concentration & N2 Flow Rate', 
-            [0, 1000], 'O2 (ppm)', 'N2 (m3/hr)'
+            [0, 150], 'O2 (ppm)', 'N2 (m3/hr)', hline_left=100
         )
         if fig_o2_n2: st.plotly_chart(fig_o2_n2, use_container_width=True, theme="streamlit")
         st.markdown('<br>', unsafe_allow_html=True)
