@@ -207,7 +207,6 @@ def render_single_chart(data, sel_names, all_channels_ref, colors_ref, title, y_
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>',
         ))
 
-    # ปรับแต่ง Layout ให้สวยงาม สบายตา ไม่มีกรอบขาวทึบกวนใจในโหมด Dark Mode
     fig.update_layout(
         title=dict(text=title, font=dict(size=18, weight="bold")),
         height=450,
@@ -241,6 +240,7 @@ st.markdown("""
 <div class="main-header">
     <h1>YOKOGAWA Recorder NB1 & NB2 CAB Furnace</h1>
     <p>Furnace Data Analysis Report</p>
+    <p style="font-size: 0.85rem; opacity: 0.8; margin-top: 8px; font-weight: 300;">by Wichien Laithanakit / Brazing Engineer / VSTS / Power Chonburi</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -327,7 +327,6 @@ tab_chart, tab_summary, tab_download = st.tabs([
 with tab_chart:
     st.markdown('<br>', unsafe_allow_html=True)
     
-    # นำ MultiSelect ด้านบนกราฟออกทั้งหมด และรับค่าโซนทั้งหมดแทน
     fig_top = render_single_chart(data, all_names_top, ALL_CH[:7], COLORS_TOP, 'Top Zones Temperature', [400, 650], '°C')
     if fig_top: st.plotly_chart(fig_top, use_container_width=True, theme="streamlit")
     st.markdown('<br>', unsafe_allow_html=True)
