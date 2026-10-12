@@ -36,11 +36,6 @@ st.markdown("""
     }
     .stat-box .val { font-size: 1.5rem; font-weight: 700; color: #2E75B6; }
     .stat-box .lbl { font-size: 0.78rem; opacity: 0.8; margin-top: 2px; }
-    
-    div[data-baseweb="select"] > div {
-        background-color: rgba(128, 128, 128, 0.1); 
-        border-radius: 8px;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -212,10 +207,10 @@ def render_single_chart(data, sel_names, all_channels_ref, colors_ref, title, y_
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>',
         ))
 
-    # ปรับแต่ง Layout เพิ่มขนาดและความคมชัดของ Legend
+    # ปรับแต่ง Layout ให้สวยงาม สบายตา ไม่มีกรอบขาวทึบกวนใจในโหมด Dark Mode
     fig.update_layout(
         title=dict(text=title, font=dict(size=18, weight="bold")),
-        height=450,  # ขยายขนาดกราฟให้ดูสบายตาขึ้น
+        height=450,
         hovermode='x unified',
         hoverlabel=dict(font_size=12, namelength=30),
         legend=dict(
@@ -223,13 +218,10 @@ def render_single_chart(data, sel_names, all_channels_ref, colors_ref, title, y_
             orientation="v",
             yanchor="middle", y=0.5, 
             xanchor="left", x=1.02,
-            bgcolor='rgba(255, 255, 255, 0.8)',
-            bordercolor='#E0E7EF',
-            borderwidth=1, 
             font=dict(size=12),
             itemsizing='constant'
         ),
-        margin=dict(l=60, r=150, t=60, b=40), # เผื่อพื้นที่ด้านขวา (r=150) สำหรับ Legend
+        margin=dict(l=60, r=150, t=60, b=40),
     )
     
     fig.update_yaxes(range=y_range, title_text=y_title, title_font=dict(size=14))
@@ -273,6 +265,7 @@ if not uploaded:
     st.info('👉 กรุณาอัปโหลดไฟล์ .DAD จากแถบเมนูด้านซ้ายเพื่อเริ่มต้นสร้างรายงานวิเคราะห์ข้อมูล')
     st.stop()
 
+# กำหนดให้ทุกเส้นแสดงเป็นค่าเริ่มต้น
 all_names_top = [name for _,name,_ in ALL_CH[:7]]
 all_names_bot = [name for _,name,_ in ALL_CH[7:14]]
 all_names_dry = [name for _,name,_ in ALL_CH[15:17]]
@@ -332,25 +325,22 @@ tab_chart, tab_summary, tab_download = st.tabs([
 ])
 
 with tab_chart:
-    st.markdown('---')
+    st.markdown('<br>', unsafe_allow_html=True)
     
-    sel_top = st.multiselect('เลือกแสดง Top Zones', all_names_top, default=all_names_top, key="ms_top")
-    fig_top = render_single_chart(data, sel_top, ALL_CH[:7], COLORS_TOP, 'Top Zones Temperature', [400, 650], '°C')
+    # นำ MultiSelect ด้านบนกราฟออกทั้งหมด และรับค่าโซนทั้งหมดแทน
+    fig_top = render_single_chart(data, all_names_top, ALL_CH[:7], COLORS_TOP, 'Top Zones Temperature', [400, 650], '°C')
     if fig_top: st.plotly_chart(fig_top, use_container_width=True, theme="streamlit")
     st.markdown('<br>', unsafe_allow_html=True)
 
-    sel_bot = st.multiselect('เลือกแสดง Bottom Zones', all_names_bot, default=all_names_bot, key="ms_bot")
-    fig_bot = render_single_chart(data, sel_bot, ALL_CH[7:14], COLORS_BOT, 'Bottom Zones Temperature', [400, 650], '°C')
+    fig_bot = render_single_chart(data, all_names_bot, ALL_CH[7:14], COLORS_BOT, 'Bottom Zones Temperature', [400, 650], '°C')
     if fig_bot: st.plotly_chart(fig_bot, use_container_width=True, theme="streamlit")
     st.markdown('<br>', unsafe_allow_html=True)
 
-    sel_dry = st.multiselect('เลือกแสดง Dryer Zones', all_names_dry, default=all_names_dry, key="ms_dry")
-    fig_dry = render_single_chart(data, sel_dry, ALL_CH[15:17], COLORS_DRY, 'Dryer Zones Temperature', [150, 400], '°C')
+    fig_dry = render_single_chart(data, all_names_dry, ALL_CH[15:17], COLORS_DRY, 'Dryer Zones Temperature', [150, 400], '°C')
     if fig_dry: st.plotly_chart(fig_dry, use_container_width=True, theme="streamlit")
     st.markdown('<br>', unsafe_allow_html=True)
     
-    sel_o2 = st.multiselect('เลือกแสดง O2 PPM', all_names_o2, default=all_names_o2, key="ms_o2")
-    fig_o2 = render_single_chart(data, sel_o2, [ALL_CH[14], ALL_CH[17]], COLORS_O2, 'O2 Concentration Level', [0, 150], 'ppm')
+    fig_o2 = render_single_chart(data, all_names_o2, [ALL_CH[14], ALL_CH[17]], COLORS_O2, 'O2 Concentration Level', [0, 150], 'ppm')
     if fig_o2: st.plotly_chart(fig_o2, use_container_width=True, theme="streamlit")
 
 with tab_summary:
@@ -358,7 +348,7 @@ with tab_summary:
     st.markdown(f'**การประมวลผลค่าที่แสดง:** {value_mode}')
     st.markdown('---')
 
-    all_sel_names = sel_top + sel_bot + sel_dry + sel_o2
+    all_sel_names = all_names_top + all_names_bot + all_names_dry + all_names_o2
     sel_channels = [(ch,name,unit) for ch,name,unit in ALL_CH if name in all_sel_names]
 
     rows_summary = []
@@ -377,26 +367,23 @@ with tab_summary:
         df = pd.DataFrame(rows_summary)
         st.dataframe(df, use_container_width=True, hide_index=True)
     else:
-        st.warning('ยังไม่ได้เลือก Zone หรือไม่มีข้อมูลตัวเลขในโซนที่เลือกครับ')
+        st.warning('ไม่มีข้อมูลตัวเลขในไฟล์ที่ประมวลผล')
 
 with tab_download:
     st.markdown('### ⬇️ Export Data Report (Excel)')
-    all_sel_names = sel_top + sel_bot + sel_dry + sel_o2
+    all_sel_names = all_names_top + all_names_bot + all_names_dry + all_names_o2
     
-    if not all_sel_names:
-        st.warning('กรุณาเลือก Zone ในแถบกราฟแสดงผลก่อนดาวน์โหลด')
-    else:
-        if st.button('📊 กดเพื่อสร้างไฟล์ Excel', type='primary'):
-            with st.spinner('⏳ ระบบกำลังเตรียมไฟล์ Excel...'):
-                excel_data = build_excel(data, dt_start, dt_end, all_sel_names)
-                fname = f'DAD_Report_NB1_NB2_{dt_start.strftime("%Y%m%d_%H%M")}.xlsx'
-                
-                st.download_button(
-                    label='⬇️ ดาวน์โหลดไฟล์ Excel (Click to Download)',
-                    data=excel_data,
-                    file_name=fname,
-                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    type='primary',
-                    use_container_width=True,
-                )
-                st.success(f'✅ ไฟล์พร้อมดาวน์โหลดแล้ว!')
+    if st.button('📊 กดเพื่อสร้างไฟล์ Excel', type='primary'):
+        with st.spinner('⏳ ระบบกำลังเตรียมไฟล์ Excel...'):
+            excel_data = build_excel(data, dt_start, dt_end, all_sel_names)
+            fname = f'DAD_Report_NB1_NB2_{dt_start.strftime("%Y%m%d_%H%M")}.xlsx'
+            
+            st.download_button(
+                label='⬇️ ดาวน์โหลดไฟล์ Excel (Click to Download)',
+                data=excel_data,
+                file_name=fname,
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                type='primary',
+                use_container_width=True,
+            )
+            st.success(f'✅ ไฟล์พร้อมดาวน์โหลดแล้ว!')
