@@ -106,7 +106,6 @@ def check_machine_type(filenames):
         else:
             has_nb1 = True
             
-    # ป้องกันการอัปโหลดไฟล์ผสมกันระหว่าง NB1 และ NB2
     if has_nb1 and has_nb2:
         return 'MIXED', []
     elif has_nb2:
@@ -258,7 +257,7 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
         fig.add_trace(go.Scatter(
             x=ts, y=[r[ch] for r in data],
             name=name, mode='lines',
-            line=dict(color=color, width=1.5),
+            line=dict(color=color, width=1.5, shape='spline'), # ── เพิ่ม shape='spline' ให้เส้นสมูท ──
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.1f}}<extra></extra>',
         ))
 
@@ -292,14 +291,16 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
     for i, (ch, name, unit) in enumerate(ch_left):
         color = colors_left[i] if isinstance(colors_left, list) else colors_left.get(ch, '#888')
         fig.add_trace(go.Scatter(
-            x=ts, y=[r[ch] for r in data], name=name, mode='lines', line=dict(color=color, width=1.5),
+            x=ts, y=[r[ch] for r in data], name=name, mode='lines', 
+            line=dict(color=color, width=1.5, shape='spline'), # ── เพิ่ม shape='spline' ให้เส้นสมูท ──
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.1f}}<extra></extra>',
         ), secondary_y=False)
 
     for i, (ch, name, unit) in enumerate(ch_right):
         color = colors_right[i] if isinstance(colors_right, list) else colors_right.get(ch, '#888')
         fig.add_trace(go.Scatter(
-            x=ts, y=[r[ch] for r in data], name=name, mode='lines', line=dict(color=color, width=1.5, dash='dot'), 
+            x=ts, y=[r[ch] for r in data], name=name, mode='lines', 
+            line=dict(color=color, width=1.5, dash='dot', shape='spline'), # ── เพิ่ม shape='spline' ให้เส้นสมูท ──
             hovertemplate=f'<b>{name}</b>: %{{y:.0f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.0f}}<extra></extra>',
         ), secondary_y=True)
 
@@ -355,7 +356,6 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown('### ⚙️ ตั้งค่าการอ่านไฟล์และกราฟ')
-    
     value_mode = st.selectbox(
         'เลือกประเภทของค่าที่ต้องการวิเคราะห์:',
         options=['MIN', 'AVG (เฉลี่ย)', 'MAX'],
@@ -370,7 +370,6 @@ if not uploaded:
 files_data = [(f.name, f.read()) for f in uploaded]
 machine_type, active_channels = check_machine_type([f[0] for f in files_data])
 
-# แจ้งเตือนและหยุดทำงานหากไฟล์ผสมกันระหว่าง NB1 และ NB2
 if machine_type == 'MIXED':
     st.error('🚨 ตรวจพบการอัปโหลดไฟล์จากทั้งเครื่อง NB1 และ NB2 ปะปนกัน! กรุณากดปุ่ม "ล้างข้อมูล" และอัปโหลดไฟล์จากเครื่องใดเครื่องหนึ่งเท่านั้นครับ')
     st.stop()
@@ -444,7 +443,6 @@ tab_chart, tab_summary, tab_download = st.tabs([
 with tab_chart:
     st.markdown('<br>', unsafe_allow_html=True)
     
-    # กำหนดสเกลอุณหภูมิ Top & Bottom แยกตามเครื่อง
     tb_y_range = [540, 650] if machine_type == 'NB1' else [400, 650]
     
     top_chs = [ch for ch in active_channels if ch[0] in ['CH001','CH002','CH003','CH004','CH005','CH006','CH007']]
