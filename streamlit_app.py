@@ -17,7 +17,6 @@ st.set_page_config(
     initial_sidebar_state='expanded',
 )
 
-# ── Initialize Session State สำหรับรีเซ็ตไฟล์ ────────────────────────────────────
 if 'uploader_key' not in st.session_state:
     st.session_state.uploader_key = 0
 
@@ -43,7 +42,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Constants & Configuration ─────────────────────────────────────────────────
-# NB1 Channels (อ้างอิงภาพล่าสุด)
 CH_NB1 = [
     ('CH001', 'Top Z#1',       '°C'),
     ('CH002', 'Top Z#2',       '°C'),
@@ -67,7 +65,6 @@ CH_NB1 = [
     ('CH020', 'DEW POINT',     'Cdp'),
 ]
 
-# NB2 Channels
 CH_NB2 = [
     ('CH001', 'Top Z#1',       '°C'),
     ('CH002', 'Top Z#2',       '°C'),
@@ -97,7 +94,6 @@ COLORS_O2_NB2 = {'CH015':'#A52A2A', 'CH018':'#ADD8E6'}
 COLORS_N2 = {'CH018': '#2E75B6'}
 COLORS_DEW = {'CH020': '#1D9E75'}
 
-# ── Check Machine Type ────────────────────────────────────────────────────────
 def check_machine_type(filenames):
     for f in filenames:
         if 'DATA' in f.upper():
@@ -106,20 +102,24 @@ def check_machine_type(filenames):
 
 # ── Parser For Binary .DAD ────────────────────────────────────────────────────
 def find_dad_params(raw):
-    max_search = min(35000, len(raw) - 200)
+    max_search = min(50000, len(raw) - 1000)
     for offset in range(10000, max_search):
         yr, mo, dy, hr, mn, sc = raw[offset:offset+6]
         if 0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59:
-            for rs in [80, 84, 88, 92, 96, 100, 104, 108, 128]:
+            # สแกนหา Record Size แบบกว้างพิเศษ รองรับ Channel จำนวนมาก
+            for rs in range(24, 1024, 4): 
                 if offset + rs*2 + 6 < len(raw):
                     yr2, mo2, dy2, hr2, mn2, sc2 = raw[offset+rs : offset+rs+6]
                     yr3, mo3, dy3, hr3, mn3, sc3 = raw[offset+rs*2 : offset+rs*2+6]
-                    if (0 <= yr2 <= 99 and 1 <= mo2 <= 12 and 1 <= dy2 <= 31 and 0 <= hr2 <= 23) and \
-                       (0 <= yr3 <= 99 and 1 <= mo3 <= 12 and 1 <= dy3 <= 31 and 0 <= hr3 <= 23):
+                    
+                    def is_valid_date(y, m, d, h, min_, s):
+                        return 0 <= y <= 99 and 1 <= m <= 12 and 1 <= d <= 31 and 0 <= h <= 23 and 0 <= min_ <= 59 and 0 <= s <= 59
+                        
+                    if is_valid_date(yr2, mo2, dy2, hr2, mn2, sc2) and is_valid_date(yr3, mo3, dy3, hr3, mn3, sc3):
                         return offset, rs
-    return 15008, 88
+    return 15008, 88 
 
-def parse_dad(raw: bytes, active_channels) -> list:
+def parse_dad(raw: bytes, active_channels, bpc) -> list:
     records = []
     offset, record_size = find_dad_params(raw)
     body_len = len(raw) - offset
@@ -141,19 +141,24 @@ def parse_dad(raw: bytes, active_channels) -> list:
         except ValueError: continue
             
         rec = {'ts': ts}
-        for ch, _, _ in active_channels:
+        for ch, _, unit in active_channels:
             ch_idx = int(ch.replace('CH', '')) - 1
-            data_pos = base + 8 + (ch_idx * 4)
-            if data_pos + 4 > len(raw): 
+            data_pos = base + 8 + (ch_idx * bpc)
+            if data_pos + 2 > base + record_size: 
                 rec[f'{ch}_min'] = rec[f'{ch}_max'] = rec[f'{ch}_avg'] = rec[ch] = None
                 continue
             
+            # การอ่านค่าตามรูปแบบ Bytes Per Channel
             min_v = struct.unpack_from('>h', raw, data_pos)[0]
-            max_v = struct.unpack_from('>h', raw, data_pos + 2)[0]
+            max_v = struct.unpack_from('>h', raw, data_pos + 2)[0] if bpc == 4 else min_v
+            
+            # ปรับแต่งตัวหารให้ถูกต้องตามหน่วย
+            divisor = 1.0 if unit == 'm3/hr' else 10.0
             
             if min_v not in (-32768, -32767, 32767, 32766) and (-30000 < min_v < 30000):
-                min_val = min_v / 10.0
-                max_val = max_v / 10.0
+                min_val = min_v / divisor
+                max_val = max_v / divisor
+                # ขยายช่วงรับค่า เพื่อรองรับ N2 ระดับพัน
                 if -1000.0 <= min_val <= 10000.0 and -1000.0 <= max_val <= 10000.0:
                     rec[f'{ch}_min'] = round(min_val, 1)
                     rec[f'{ch}_max'] = round(max_val, 1)
@@ -174,17 +179,11 @@ def build_excel(data, dt_start, dt_end, active_channels, mode_str, machine_type)
 
     ws['A1'] = "YOKOGAWA Recorder Data Analysis Report"
     ws['A1'].font = Font(bold=True, size=12, color='1F4E79')
-    
-    ws['A3'] = "Machine Type"
-    ws['B3'] = machine_type
-    ws['A4'] = "Data Count"
-    ws['B4'] = len(data)
-    ws['A5'] = "Start Time"
-    ws['B5'] = dt_start.strftime("%Y/%m/%d %H:%M:%S")
-    ws['A6'] = "Stop Time"
-    ws['B6'] = dt_end.strftime("%Y/%m/%d %H:%M:%S")
-    ws['A7'] = "Value Mode"
-    ws['B7'] = mode_str
+    ws['A3'], ws['B3'] = "Machine Type", machine_type
+    ws['A4'], ws['B4'] = "Data Count", len(data)
+    ws['A5'], ws['B5'] = "Start Time", dt_start.strftime("%Y/%m/%d %H:%M:%S")
+    ws['A6'], ws['B6'] = "Stop Time", dt_end.strftime("%Y/%m/%d %H:%M:%S")
+    ws['A7'], ws['B7'] = "Value Mode", mode_str
     
     hdr_fill = PatternFill('solid', fgColor='F0F4F8')
     hdr_font = Font(bold=True, size=9)
@@ -198,7 +197,6 @@ def build_excel(data, dt_start, dt_end, active_channels, mode_str, machine_type)
     
     c_date = ws.cell(row=12, column=1, value="Date")
     c_date.font, c_date.border, c_date.fill = hdr_font, border, hdr_fill
-    
     c_time = ws.cell(row=12, column=2, value="Time")
     c_time.font, c_time.border, c_time.fill = hdr_font, border, hdr_fill
 
@@ -207,7 +205,6 @@ def build_excel(data, dt_start, dt_end, active_channels, mode_str, machine_type)
         ws.cell(row=9, column=col, value=ch).font = norm_font
         ws.cell(row=10, column=col, value=name).font = norm_font
         ws.cell(row=11, column=col, value=unit).font = norm_font
-        
         c = ws.cell(row=12, column=col, value=mode_str)
         c.font, c.border, c.fill = hdr_font, border, hdr_fill
         c.alignment = Alignment(horizontal='right')
@@ -216,12 +213,9 @@ def build_excel(data, dt_start, dt_end, active_channels, mode_str, machine_type)
         ts = rec['ts']
         ws.cell(row=ri, column=1, value=ts.strftime('%Y/%m/%d')).font = norm_font
         ws.cell(row=ri, column=2, value=ts.strftime('%H:%M:%S')).font = norm_font
-        
         for i, (ch, _, _) in enumerate(active_channels):
-            val = rec[ch]
-            c = ws.cell(row=ri, column=i+3, value=val)
-            c.font = norm_font
-            c.number_format = '0.0'
+            c = ws.cell(row=ri, column=i+3, value=rec[ch])
+            c.font, c.number_format = norm_font, '0.0'
 
     ws.column_dimensions['A'].width = 12
     ws.column_dimensions['B'].width = 10
@@ -229,7 +223,6 @@ def build_excel(data, dt_start, dt_end, active_channels, mode_str, machine_type)
         ws.column_dimensions[get_column_letter(i+3)].width = 11
         
     ws.freeze_panes = 'A13'
-    
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -237,9 +230,7 @@ def build_excel(data, dt_start, dt_end, active_channels, mode_str, machine_type)
 
 # ── Chart Builder ─────────────────────────────────────────────────────────────
 def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hline=None):
-    if not ch_list:
-        return None
-
+    if not ch_list: return None
     fig = go.Figure()
     ts = [r['ts'] for r in data]
     
@@ -254,10 +245,7 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
 
     if hline is not None:
         fig.add_hline(
-            y=hline, 
-            line_dash="dash", 
-            line_color="#FF4B4B", 
-            line_width=1.5,
+            y=hline, line_dash="dash", line_color="#FF4B4B", line_width=1.5,
             annotation_text=f"Standard {hline} {y_title}", 
             annotation_position="bottom right",
             annotation_font=dict(color="#FF4B4B", size=12)
@@ -265,30 +253,17 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
 
     fig.update_layout(
         title=dict(text=title, font=dict(size=18, weight="bold")),
-        height=450,
-        hovermode='x unified',
-        hoverlabel=dict(font_size=12, namelength=30),
+        height=450, hovermode='x unified', hoverlabel=dict(font_size=12, namelength=30),
         legend=dict(
-            title="Channels",
-            orientation="v",
-            yanchor="middle", y=0.5, 
-            xanchor="left", x=1.02,
-            font=dict(size=12),
-            itemsizing='constant'
+            title="Channels", orientation="v", yanchor="middle", y=0.5, 
+            xanchor="left", x=1.02, font=dict(size=12), itemsizing='constant'
         ),
         margin=dict(l=60, r=150, t=60, b=40),
     )
     
-    if y_range:
-        fig.update_yaxes(range=y_range, title_text=y_title, title_font=dict(size=14))
-    else:
-        fig.update_yaxes(title_text=y_title, title_font=dict(size=14))
-        
-    fig.update_xaxes(
-        tickformat='%d/%m\n%H:%M',
-        tickfont=dict(size=11),
-        showticklabels=True,
-    )
+    if y_range: fig.update_yaxes(range=y_range, title_text=y_title, title_font=dict(size=14))
+    else: fig.update_yaxes(title_text=y_title, title_font=dict(size=14))
+    fig.update_xaxes(tickformat='%d/%m\n%H:%M', tickfont=dict(size=11), showticklabels=True)
     return fig
 
 def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, title, y1_range, y1_title, y2_title, hline_left=None, y2_range=None):
@@ -298,61 +273,38 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
     for i, (ch, name, unit) in enumerate(ch_left):
         color = colors_left[i] if isinstance(colors_left, list) else colors_left.get(ch, '#888')
         fig.add_trace(go.Scatter(
-            x=ts, y=[r[ch] for r in data],
-            name=name, mode='lines',
-            line=dict(color=color, width=1.5),
+            x=ts, y=[r[ch] for r in data], name=name, mode='lines', line=dict(color=color, width=1.5),
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>',
         ), secondary_y=False)
 
     for i, (ch, name, unit) in enumerate(ch_right):
         color = colors_right[i] if isinstance(colors_right, list) else colors_right.get(ch, '#888')
         fig.add_trace(go.Scatter(
-            x=ts, y=[r[ch] for r in data],
-            name=name, mode='lines',
-            line=dict(color=color, width=1.5, dash='dot'), 
+            x=ts, y=[r[ch] for r in data], name=name, mode='lines', line=dict(color=color, width=1.5, dash='dot'), 
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>',
         ), secondary_y=True)
 
     if hline_left is not None:
         fig.add_hline(
-            y=hline_left, 
-            line_dash="dash", 
-            line_color="#FF4B4B", 
-            line_width=1.5,
+            y=hline_left, line_dash="dash", line_color="#FF4B4B", line_width=1.5,
             annotation_text=f"Standard {hline_left} {y1_title.split()[0]}", 
-            annotation_position="bottom right",
-            annotation_font=dict(color="#FF4B4B", size=12),
-            secondary_y=False
+            annotation_position="bottom right", annotation_font=dict(color="#FF4B4B", size=12), secondary_y=False
         )
 
     fig.update_layout(
         title=dict(text=title, font=dict(size=18, weight="bold")),
-        height=450,
-        hovermode='x unified',
-        hoverlabel=dict(font_size=12, namelength=30),
+        height=450, hovermode='x unified', hoverlabel=dict(font_size=12, namelength=30),
         legend=dict(
-            title="Channels",
-            orientation="v",
-            yanchor="middle", y=0.5, 
-            xanchor="left", x=1.08, 
-            font=dict(size=12),
-            itemsizing='constant'
+            title="Channels", orientation="v", yanchor="middle", y=0.5, 
+            xanchor="left", x=1.08, font=dict(size=12), itemsizing='constant'
         ),
         margin=dict(l=60, r=180, t=60, b=40),
     )
     
     fig.update_yaxes(range=y1_range, title_text=y1_title, title_font=dict(size=14), secondary_y=False)
-    
-    if y2_range:
-        fig.update_yaxes(range=y2_range, title_text=y2_title, title_font=dict(size=14), secondary_y=True, showgrid=False)
-    else:
-        fig.update_yaxes(title_text=y2_title, title_font=dict(size=14), secondary_y=True, showgrid=False)
-        
-    fig.update_xaxes(
-        tickformat='%d/%m\n%H:%M',
-        tickfont=dict(size=11),
-        showticklabels=True,
-    )
+    if y2_range: fig.update_yaxes(range=y2_range, title_text=y2_title, title_font=dict(size=14), secondary_y=True, showgrid=False)
+    else: fig.update_yaxes(title_text=y2_title, title_font=dict(size=14), secondary_y=True, showgrid=False)
+    fig.update_xaxes(tickformat='%d/%m\n%H:%M', tickfont=dict(size=11), showticklabels=True)
     return fig
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -383,7 +335,16 @@ with st.sidebar:
     )
     
     st.markdown("---")
-    st.markdown('### ⚙️ ตั้งค่าการแสดงผลกราฟ')
+    st.markdown('### ⚙️ ตั้งค่าการอ่านไฟล์และกราฟ')
+    
+    # ── เพิ่มปุ่มสลับ Format ป้องกันกราฟหาย ──
+    data_format = st.selectbox(
+        'ประเภทไฟล์จาก Yokogawa:',
+        options=['Event Data (ค่าเดียว/ช่อง) - แนะนำ', 'Display Data (Min/Max/Avg)'],
+        index=0 
+    )
+    bpc = 2 if 'Event' in data_format else 4
+
     value_mode = st.selectbox(
         'เลือกประเภทของค่าที่ต้องการวิเคราะห์:',
         options=['MIN', 'AVG (เฉลี่ย)', 'MAX'],
@@ -399,10 +360,10 @@ files_data = [(f.name, f.read()) for f in uploaded]
 machine_type, active_channels = check_machine_type([f[0] for f in files_data])
 
 @st.cache_data(show_spinner=f'⏳ กำลังประมวลผลไฟล์จากเครื่อง {machine_type}...')
-def process_dad_files(files_d, mode_k, act_channels):
+def process_dad_files(files_d, mode_k, act_channels, bytes_per_ch):
     all_records = []
     for fname, raw in files_d:
-        recs = parse_dad(raw, act_channels)
+        recs = parse_dad(raw, act_channels, bytes_per_ch)
         
         if len(recs) > 10:
             all_records.extend(recs[3:-2])
@@ -410,7 +371,6 @@ def process_dad_files(files_d, mode_k, act_channels):
             all_records.extend(recs)
         
     if not all_records: return []
-    
     all_records.sort(key=lambda x: x['ts'])
     
     if len(all_records) > 0:
@@ -423,7 +383,6 @@ def process_dad_files(files_d, mode_k, act_channels):
                 streaks.append(current_streak)
                 current_streak = [all_records[i]]
         streaks.append(current_streak)
-        
         all_records = max(streaks, key=len)
         
     seen = set()
@@ -438,15 +397,14 @@ def process_dad_files(files_d, mode_k, act_channels):
             unique.append(new_r)
     return unique
 
-data = process_dad_files(tuple((n,d) for n,d in files_data), mode_key, tuple(active_channels))
+data = process_dad_files(tuple((n,d) for n,d in files_data), mode_key, tuple(active_channels), bpc)
 
 if len(data) == 0:
-    st.error('🚨 ไม่พบข้อมูลที่อ่านได้จากไฟล์ที่อัปโหลด หรือรูปแบบไฟล์ไม่ถูกต้อง')
+    st.error('🚨 ไม่พบข้อมูลในไฟล์ที่อัปโหลด โปรดลองเปลี่ยน "ประเภทไฟล์จาก Yokogawa" ในแถบเมนูด้านซ้าย')
     st.stop()
 
 dt_start = data[0]['ts']
 dt_end = data[-1]['ts']
-
 duration = dt_end - dt_start
 hrs = int(duration.total_seconds() // 3600)
 mins = int((duration.total_seconds() % 3600) // 60)
@@ -490,12 +448,9 @@ with tab_chart:
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH018']]
         fig_o2 = render_single_chart(data, o2_chs, COLORS_O2_NB2, 'O2 Concentration Level', [0, 150], 'ppm', hline=100)
         if fig_o2: st.plotly_chart(fig_o2, use_container_width=True, theme="streamlit")
-        
     else:
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH019']]
         n2_chs = [ch for ch in active_channels if ch[0] == 'CH018']
-        
-        # ปรับ Scale O2 ฝั่งซ้ายเป็น 0-150 ppm (เพิ่ม hline 100) และ N2 ฝั่งขวา 0-1000 m3/hr
         fig_o2_n2 = render_dual_axis_chart(
             data, o2_chs, n2_chs, 
             COLORS_O2_NB1, COLORS_N2, 
