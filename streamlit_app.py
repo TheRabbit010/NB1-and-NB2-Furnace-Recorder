@@ -1,12 +1,10 @@
 import streamlit as st
 import struct
 import io
-import re
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
-from collections import defaultdict
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -106,7 +104,7 @@ def check_machine_type(filenames):
             return 'NB2', CH_NB2
     return 'NB1', CH_NB1
 
-# ── Robust Parser ─────────────────────────────────────────────────────────────
+# ── Parser For Binary .DAD ────────────────────────────────────────────────────
 def find_dad_params(raw):
     max_search = min(35000, len(raw) - 200)
     for offset in range(10000, max_search):
@@ -124,7 +122,6 @@ def find_dad_params(raw):
 def parse_dad(raw: bytes, active_channels) -> list:
     records = []
     offset, record_size = find_dad_params(raw)
-    
     body_len = len(raw) - offset
     if body_len <= 0: return records
     total = body_len // record_size
@@ -141,8 +138,7 @@ def parse_dad(raw: bytes, active_channels) -> list:
         parsed_yr = (2000 + yr) if yr < 80 else (1900 + yr)
         try:
             ts = datetime(parsed_yr, mo, dy, hr, mn, sc)
-        except ValueError:
-            continue
+        except ValueError: continue
             
         rec = {'ts': ts}
         for ch, _, _ in active_channels:
@@ -155,10 +151,7 @@ def parse_dad(raw: bytes, active_channels) -> list:
             min_v = struct.unpack_from('>h', raw, data_pos)[0]
             max_v = struct.unpack_from('>h', raw, data_pos + 2)[0]
             
-            def is_valid(v):
-                return v not in (-32768, -32767, 32767, 32766) and (-30000 < v < 30000)
-            
-            if is_valid(min_v) and is_valid(max_v):
+            if min_v not in (-32768, -32767, 32767, 32766) and (-30000 < min_v < 30000):
                 min_val = min_v / 10.0
                 max_val = max_v / 10.0
                 if -200.0 <= min_val <= 2000.0 and -200.0 <= max_val <= 2000.0:
@@ -170,7 +163,6 @@ def parse_dad(raw: bytes, active_channels) -> list:
                     rec[f'{ch}_min'] = rec[f'{ch}_max'] = rec[f'{ch}_avg'] = rec[ch] = None
             else:
                 rec[f'{ch}_min'] = rec[f'{ch}_max'] = rec[f'{ch}_avg'] = rec[ch] = None
-                
         records.append(rec)
     return records
 
@@ -407,7 +399,7 @@ files_data = [(f.name, f.read()) for f in uploaded]
 machine_type, active_channels = check_machine_type([f[0] for f in files_data])
 
 @st.cache_data(show_spinner=f'⏳ กำลังประมวลผลไฟล์จากเครื่อง {machine_type}...')
-def load_data_auto(files_d, mode_k, act_channels):
+def process_dad_files(files_d, mode_k, act_channels):
     all_records = []
     for fname, raw in files_d:
         recs = parse_dad(raw, act_channels)
@@ -437,7 +429,7 @@ def load_data_auto(files_d, mode_k, act_channels):
             unique.append(new_r)
     return unique
 
-data = load_data_auto(tuple((n,d) for n,d in files_data), mode_key, tuple(active_channels))
+data = process_dad_files(tuple((n,d) for n,d in files_data), mode_key, tuple(active_channels))
 
 if len(data) == 0:
     st.error('🚨 ไม่พบข้อมูลที่อ่านได้จากไฟล์ที่อัปโหลด หรือรูปแบบไฟล์ไม่ถูกต้อง')
@@ -479,7 +471,6 @@ with tab_chart:
     if fig_bot: st.plotly_chart(fig_bot, use_container_width=True, theme="streamlit")
     st.markdown('<br>', unsafe_allow_html=True)
 
-    # ── เช็คเครื่องเพื่อปรับ Scale Dryer ──
     dry_chs = [ch for ch in active_channels if ch[0] in ['CH016','CH017']]
     dry_y_range = [150, 350] if machine_type == 'NB1' else [150, 400]
     fig_dry = render_single_chart(data, dry_chs, COLORS_DRY, f'Dryer Zones Temperature ({machine_type})', dry_y_range, '°C')
@@ -495,7 +486,6 @@ with tab_chart:
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH019']]
         n2_chs = [ch for ch in active_channels if ch[0] == 'CH018']
         
-        # ── NB1: ปรับ N2 Range (y2_range) เป็น 0-1000 ──
         fig_o2_n2 = render_dual_axis_chart(
             data, o2_chs, n2_chs, 
             COLORS_O2_NB1, COLORS_N2, 
