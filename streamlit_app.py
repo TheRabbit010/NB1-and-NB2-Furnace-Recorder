@@ -257,7 +257,7 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
         fig.add_trace(go.Scatter(
             x=ts, y=[r[ch] for r in data],
             name=name, mode='lines',
-            line=dict(color=color, width=1.0), 
+            line=dict(color=color, width=1.0, shape='spline'),  # ── คืนค่า shape='spline' ให้เส้นกราฟดูเรียบเนียนสมูท ──
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.1f}}<extra></extra>',
         ))
 
@@ -270,7 +270,7 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
         )
 
     fig.update_layout(
-        template='plotly_dark', # ตั้งเป็นโหมด Dark โดยอัตโนมัติ
+        template='plotly_dark',
         title=dict(text=title, font=dict(size=18, weight="bold")),
         height=450, hovermode='x unified', hoverlabel=dict(font_size=12, namelength=30),
         legend=dict(
@@ -293,7 +293,7 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
         color = colors_left[i] if isinstance(colors_left, list) else colors_left.get(ch, '#888')
         fig.add_trace(go.Scatter(
             x=ts, y=[r[ch] for r in data], name=name, mode='lines', 
-            line=dict(color=color, width=1.0),
+            line=dict(color=color, width=1.0, shape='spline'),  # ── คืนค่า shape='spline' ให้เส้นสมูท ──
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.1f}}<extra></extra>',
         ), secondary_y=False)
 
@@ -301,7 +301,7 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
         color = colors_right[i] if isinstance(colors_right, list) else colors_right.get(ch, '#888')
         fig.add_trace(go.Scatter(
             x=ts, y=[r[ch] for r in data], name=name, mode='lines', 
-            line=dict(color=color, width=1.0, dash='dot'), 
+            line=dict(color=color, width=1.0, dash='dot', shape='spline'), # ── คืนค่า shape='spline' ให้เส้นสมูท ──
             hovertemplate=f'<b>{name}</b>: %{{y:.0f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.0f}}<extra></extra>',
         ), secondary_y=True)
 
@@ -313,7 +313,7 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
         )
 
     fig.update_layout(
-        template='plotly_dark', # ตั้งเป็นโหมด Dark โดยอัตโนมัติ
+        template='plotly_dark',
         title=dict(text=title, font=dict(size=18, weight="bold")),
         height=450, hovermode='x unified', hoverlabel=dict(font_size=12, namelength=30),
         legend=dict(
@@ -357,7 +357,7 @@ with st.sidebar:
     )
     
     st.markdown("---")
-    st.markdown('### ⚙️ ตั้งค่าการอ่านไฟล์และกราฟ')
+    st.markdown('### ⚙️ ตั้งค่าการแสดงผลกราฟ')
     value_mode = st.selectbox(
         'เลือกประเภทของค่าที่ต้องการวิเคราะห์:',
         options=['MIN', 'AVG (เฉลี่ย)', 'MAX'],
@@ -449,7 +449,6 @@ with tab_chart:
     
     top_chs = [ch for ch in active_channels if ch[0] in ['CH001','CH002','CH003','CH004','CH005','CH006','CH007']]
     fig_top = render_single_chart(data, top_chs, COLORS_TOP, f'Top Zones Temperature ({machine_type})', tb_y_range, '°C')
-    # ใช้ theme=None เพื่อให้แสดงผลเป็น template='plotly_dark' อย่างสมบูรณ์โดยไม่ถูก streamlit override กลับ
     if fig_top: st.plotly_chart(fig_top, use_container_width=True, theme=None)
     st.markdown('<br>', unsafe_allow_html=True)
 
