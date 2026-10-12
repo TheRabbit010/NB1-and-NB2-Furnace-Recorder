@@ -1,12 +1,10 @@
 import streamlit as st
 import struct
 import io
-import re
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
-from collections import defaultdict
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -45,7 +43,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Constants & Configuration ─────────────────────────────────────────────────
-# NB1 Channels
+# NB1 Channels (อ้างอิงภาพล่าสุด)
 CH_NB1 = [
     ('CH001', 'Top Z#1',       '°C'),
     ('CH002', 'Top Z#2',       '°C'),
@@ -112,7 +110,6 @@ def find_dad_params(raw):
     for offset in range(10000, max_search):
         yr, mo, dy, hr, mn, sc = raw[offset:offset+6]
         if 0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59:
-            # เพิ่ม 104, 108 เพื่อรองรับข้อมูลที่กว้างขึ้น (เช่น 20+ Channels)
             for rs in [80, 84, 88, 92, 96, 100, 104, 108, 128]:
                 if offset + rs*2 + 6 < len(raw):
                     yr2, mo2, dy2, hr2, mn2, sc2 = raw[offset+rs : offset+rs+6]
@@ -157,7 +154,6 @@ def parse_dad(raw: bytes, active_channels) -> list:
             if min_v not in (-32768, -32767, 32767, 32766) and (-30000 < min_v < 30000):
                 min_val = min_v / 10.0
                 max_val = max_v / 10.0
-                # ขยายขอบเขตการรับค่าเผื่อไว้ที่ -1000 ถึง 10000 (แก้ปัญหาค่า N2 ที่ทะลุไปถึงระดับพัน)
                 if -1000.0 <= min_val <= 10000.0 and -1000.0 <= max_val <= 10000.0:
                     rec[f'{ch}_min'] = round(min_val, 1)
                     rec[f'{ch}_max'] = round(max_val, 1)
@@ -403,12 +399,11 @@ files_data = [(f.name, f.read()) for f in uploaded]
 machine_type, active_channels = check_machine_type([f[0] for f in files_data])
 
 @st.cache_data(show_spinner=f'⏳ กำลังประมวลผลไฟล์จากเครื่อง {machine_type}...')
-def load_data_auto(files_d, mode_k, act_channels):
+def process_dad_files(files_d, mode_k, act_channels):
     all_records = []
     for fname, raw in files_d:
         recs = parse_dad(raw, act_channels)
         
-        # ตัดข้อมูลขยะช่วงต่อไฟล์ทิ้ง 3 บรรทัดแรกและ 2 บรรทัดสุดท้าย
         if len(recs) > 10:
             all_records.extend(recs[3:-2])
         else:
@@ -418,12 +413,10 @@ def load_data_auto(files_d, mode_k, act_channels):
     
     all_records.sort(key=lambda x: x['ts'])
     
-    # ── กรองข้อมูล Outlier อิงความต่อเนื่องของเวลา (Time Continuity) ──
     if len(all_records) > 0:
         streaks = []
         current_streak = [all_records[0]]
         for i in range(1, len(all_records)):
-            # ถ้าระยะเวลาห่างกันเกิน 2 วัน ถือว่าเป็นข้อมูลขยะที่กระโดดข้ามปี
             if (all_records[i]['ts'] - all_records[i-1]['ts']).total_seconds() <= 86400 * 2:
                 current_streak.append(all_records[i])
             else:
@@ -431,7 +424,6 @@ def load_data_auto(files_d, mode_k, act_channels):
                 current_streak = [all_records[i]]
         streaks.append(current_streak)
         
-        # เลือกกลุ่มข้อมูลที่ยาวที่สุด (ตัดพวกค่าขยะที่เวลาเพี้ยนทิ้ง)
         all_records = max(streaks, key=len)
         
     seen = set()
@@ -446,7 +438,7 @@ def load_data_auto(files_d, mode_k, act_channels):
             unique.append(new_r)
     return unique
 
-data = load_data_auto(tuple((n,d) for n,d in files_data), mode_key, tuple(active_channels))
+data = process_dad_files(tuple((n,d) for n,d in files_data), mode_key, tuple(active_channels))
 
 if len(data) == 0:
     st.error('🚨 ไม่พบข้อมูลที่อ่านได้จากไฟล์ที่อัปโหลด หรือรูปแบบไฟล์ไม่ถูกต้อง')
@@ -503,6 +495,7 @@ with tab_chart:
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH019']]
         n2_chs = [ch for ch in active_channels if ch[0] == 'CH018']
         
+        # ปรับ Scale O2 ฝั่งซ้ายเป็น 0-150 ppm (เพิ่ม hline 100) และ N2 ฝั่งขวา 0-1000 m3/hr
         fig_o2_n2 = render_dual_axis_chart(
             data, o2_chs, n2_chs, 
             COLORS_O2_NB1, COLORS_N2, 
