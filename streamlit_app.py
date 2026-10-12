@@ -17,6 +17,7 @@ st.set_page_config(
     initial_sidebar_state='expanded',
 )
 
+# ── Initialize Session State ──────────────────────────────────────────────────
 if 'uploader_key' not in st.session_state:
     st.session_state.uploader_key = 0
 
@@ -42,6 +43,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Constants & Configuration ─────────────────────────────────────────────────
+# NB1 Channels (เอาหน่วย m3/hr ออกจาก CH018 ตามความต้องการ)
 CH_NB1 = [
     ('CH001', 'Top Z#1',       '°C'),
     ('CH002', 'Top Z#2',       '°C'),
@@ -61,10 +63,11 @@ CH_NB1 = [
     ('CH019', 'ENTRANCE O2',   'ppm'),
     ('CH016', 'Dryer #1',      '°C'),
     ('CH017', 'Dryer #2',      '°C'),
-    ('CH018', 'N2 .1',         'm3/hr'),
+    ('CH018', 'N2 .1',         ''),
     ('CH020', 'DEW POINT',     'Cdp'),
 ]
 
+# NB2 Channels
 CH_NB2 = [
     ('CH001', 'Top Z#1',       '°C'),
     ('CH002', 'Top Z#2',       '°C'),
@@ -100,13 +103,12 @@ def check_machine_type(filenames):
             return 'NB2', CH_NB2
     return 'NB1', CH_NB1
 
-# ── Parser For Binary .DAD (Auto-Detect Mode) ──────────────────────────────────
+# ── Auto-Detect BPC & Parser For Binary .DAD ─────────────────────────────────
 def find_dad_params(raw):
     max_search = min(50000, len(raw) - 1000)
     for offset in range(10000, max_search):
         yr, mo, dy, hr, mn, sc = raw[offset:offset+6]
         if 0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59:
-            # สแกนหา Record Size อัตโนมัติ ไม่จำกัดว่าจะเป็น Event หรือ Display Data
             for rs in range(24, 1024, 4): 
                 if offset + rs*2 + 6 < len(raw):
                     yr2, mo2, dy2, hr2, mn2, sc2 = raw[offset+rs : offset+rs+6]
@@ -116,9 +118,6 @@ def find_dad_params(raw):
                         return 0 <= y <= 99 and 1 <= m <= 12 and 1 <= d <= 31 and 0 <= h <= 23 and 0 <= min_ <= 59 and 0 <= s <= 59
                         
                     if is_valid_date(yr2, mo2, dy2, hr2, mn2, sc2) and is_valid_date(yr3, mo3, dy3, hr3, mn3, sc3):
-                        # ถ้าระยะห่างของ rs มันพอดีกับจำนวนช่องสัญญาณ แสดงว่าเป็น Display Data (4 Bytes), ถ้าไม่ใช่คือ Event Data (2 bytes)
-                        # เบื้องต้นเราสามารถเช็คได้จากการจัดเรียงข้อมูล
-                        # หรือเพื่อให้ครอบคลุมที่สุด เราจะคืนค่า rs ออกไป แล้วไปเช็ค bpc ตอนจะ parse
                         return offset, rs
     return 15008, 88 
 
@@ -126,15 +125,9 @@ def parse_dad(raw: bytes, active_channels) -> list:
     records = []
     offset, record_size = find_dad_params(raw)
     
-    # Auto-Detect Bytes Per Channel (bpc) จาก Record Size
-    # Header ใช้ 8 bytes. ส่วนที่เหลือคือ Data ของ Channels
-    # ถ้าพื้นที่เหลือพอหาร 4 แบบลงตัวกับจำนวนช่องสัญญาณ จะถือว่าเป็น Display Data (4 bytes/ch)
-    num_channels_approx = (record_size - 8) // 4
-    if num_channels_approx >= len(active_channels):
-        bpc = 4
-    else:
-        bpc = 2
-        
+    # Auto-Detect ว่าเป็น Event Data (2 bytes) หรือ Display Data (4 bytes)
+    bpc = 4 if record_size >= 70 else 2
+    
     body_len = len(raw) - offset
     if body_len <= 0: return records
     total = body_len // record_size
@@ -154,7 +147,7 @@ def parse_dad(raw: bytes, active_channels) -> list:
         except ValueError: continue
             
         rec = {'ts': ts}
-        for ch, _, unit in active_channels:
+        for ch, _, _ in active_channels:
             ch_idx = int(ch.replace('CH', '')) - 1
             data_pos = base + 8 + (ch_idx * bpc)
             
@@ -162,13 +155,18 @@ def parse_dad(raw: bytes, active_channels) -> list:
                 rec[f'{ch}_min'] = rec[f'{ch}_max'] = rec[f'{ch}_avg'] = rec[ch] = None
                 continue
             
-            min_v = struct.unpack_from('>h', raw, data_pos)[0]
-            max_v = struct.unpack_from('>h', raw, data_pos + 2)[0] if bpc == 4 else min_v
+            # เรียง Min/Max ให้ถูกต้อง เพื่อให้กราฟ MAX สมูทและไม่ขรุขระ
+            v1 = struct.unpack_from('>h', raw, data_pos)[0]
+            if bpc == 4 and data_pos + 4 <= base + record_size:
+                v2 = struct.unpack_from('>h', raw, data_pos + 2)[0]
+                min_v = min(v1, v2)
+                max_v = max(v1, v2)
+            else:
+                min_v = max_v = v1
             
-            # CH018 (N2) เก็บค่าเต็มไม่มีทศนิยม (หาร 1.0) / อุณหภูมิและอื่นๆ เก็บค่าทศนิยม 1 ตำแหน่ง (หาร 10.0)
             divisor = 1.0 if ch == 'CH018' else 10.0
             
-            if min_v not in (-32768, -32767, 32767, 32766) and (-30000 < min_v < 30000):
+            if v1 not in (-32768, -32767, 32767, 32766) and (-30000 < v1 < 30000):
                 min_val = min_v / divisor
                 max_val = max_v / divisor
                 if -1000.0 <= min_val <= 10000.0 and -1000.0 <= max_val <= 10000.0:
@@ -252,7 +250,7 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
             x=ts, y=[r[ch] for r in data],
             name=name, mode='lines',
             line=dict(color=color, width=1.5),
-            hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>',
+            hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.1f}}<extra></extra>',
         ))
 
     if hline is not None:
@@ -275,8 +273,6 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
     
     if y_range: fig.update_yaxes(range=y_range, title_text=y_title, title_font=dict(size=14))
     else: fig.update_yaxes(title_text=y_title, title_font=dict(size=14))
-    
-    # ── เอา dtick ออกเพื่อให้กราฟ Auto Scale แกนเวลาได้อย่างสมบูรณ์ ──
     fig.update_xaxes(tickformat='%d/%m\n%H:%M', tickfont=dict(size=11), showticklabels=True)
     return fig
 
@@ -288,14 +284,14 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
         color = colors_left[i] if isinstance(colors_left, list) else colors_left.get(ch, '#888')
         fig.add_trace(go.Scatter(
             x=ts, y=[r[ch] for r in data], name=name, mode='lines', line=dict(color=color, width=1.5),
-            hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>',
+            hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.1f}}<extra></extra>',
         ), secondary_y=False)
 
     for i, (ch, name, unit) in enumerate(ch_right):
         color = colors_right[i] if isinstance(colors_right, list) else colors_right.get(ch, '#888')
         fig.add_trace(go.Scatter(
             x=ts, y=[r[ch] for r in data], name=name, mode='lines', line=dict(color=color, width=1.5, dash='dot'), 
-            hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>',
+            hovertemplate=f'<b>{name}</b>: %{{y:.0f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.0f}}<extra></extra>',
         ), secondary_y=True)
 
     if hline_left is not None:
@@ -316,14 +312,8 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
     )
     
     fig.update_yaxes(range=y1_range, title_text=y1_title, title_font=dict(size=14), secondary_y=False)
-    
-    # ── เอาแกน Y2 (ชื่อหน่วย) ออกตามที่ร้องขอ แต่ยังคงมีกราฟและ Auto-Scale ไว้ ──
-    if y2_range: 
-        fig.update_yaxes(range=y2_range, title_text="", secondary_y=True, showgrid=False)
-    else: 
-        fig.update_yaxes(title_text="", secondary_y=True, showgrid=False)
-        
-    # ── เอา dtick ออกเพื่อให้กราฟ Auto Scale แกนเวลาได้อย่างสมบูรณ์ ──
+    if y2_range: fig.update_yaxes(range=y2_range, title_text=y2_title, title_font=dict(size=14), secondary_y=True, showgrid=False)
+    else: fig.update_yaxes(title_text=y2_title, title_font=dict(size=14), secondary_y=True, showgrid=False)
     fig.update_xaxes(tickformat='%d/%m\n%H:%M', tickfont=dict(size=11), showticklabels=True)
     return fig
 
@@ -355,8 +345,8 @@ with st.sidebar:
     )
     
     st.markdown("---")
-    st.markdown('### ⚙️ ตั้งค่าการอ่านไฟล์และกราฟ')
-    
+    st.markdown('### ⚙️ ตั้งค่าการแสดงผลกราฟ')
+
     value_mode = st.selectbox(
         'เลือกประเภทของค่าที่ต้องการวิเคราะห์:',
         options=['MIN', 'AVG (เฉลี่ย)', 'MAX'],
@@ -383,19 +373,14 @@ def process_dad_files(files_d, mode_k, act_channels):
             all_records.extend(recs)
         
     if not all_records: return []
+    
     all_records.sort(key=lambda x: x['ts'])
     
+    # ── กรองข้อมูล Outlier อิงความต่อเนื่องของเวลา (Median Filter) ไม่ให้กราฟขาดตอน ──
     if len(all_records) > 0:
-        streaks = []
-        current_streak = [all_records[0]]
-        for i in range(1, len(all_records)):
-            if (all_records[i]['ts'] - all_records[i-1]['ts']).total_seconds() <= 86400 * 2:
-                current_streak.append(all_records[i])
-            else:
-                streaks.append(current_streak)
-                current_streak = [all_records[i]]
-        streaks.append(current_streak)
-        all_records = max(streaks, key=len)
+        sorted_ts = sorted([r['ts'] for r in all_records])
+        mid_ts = sorted_ts[len(sorted_ts) // 2]
+        all_records = [r for r in all_records if abs((r['ts'] - mid_ts).days) <= 15]
         
     seen = set()
     unique = []
@@ -417,6 +402,7 @@ if len(data) == 0:
 
 dt_start = data[0]['ts']
 dt_end = data[-1]['ts']
+
 duration = dt_end - dt_start
 hrs = int(duration.total_seconds() // 3600)
 mins = int((duration.total_seconds() % 3600) // 60)
@@ -463,12 +449,14 @@ with tab_chart:
     else:
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH019']]
         n2_chs = [ch for ch in active_channels if ch[0] == 'CH018']
+        
+        # ปรับ Fixed Scale N2 ให้เป็น 0-5000 ตามที่คุณต้องการ
         fig_o2_n2 = render_dual_axis_chart(
             data, o2_chs, n2_chs, 
             COLORS_O2_NB1, COLORS_N2, 
             'O2 Concentration & N2 Flow Rate', 
             [0, 150], 'O2 (ppm)', '', 
-            hline_left=100, y2_range=[0, 1000]
+            hline_left=100, y2_range=[0, 5000]
         )
         if fig_o2_n2: st.plotly_chart(fig_o2_n2, use_container_width=True, theme="streamlit")
         st.markdown('<br>', unsafe_allow_html=True)
