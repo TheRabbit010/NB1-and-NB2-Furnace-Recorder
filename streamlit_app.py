@@ -45,7 +45,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Constants & Configuration ─────────────────────────────────────────────────
-# NB1 Channels (อ้างอิงจากภาพล่าสุด)
+# NB1 Channels
 CH_NB1 = [
     ('CH001', 'Top Z#1',       '°C'),
     ('CH002', 'Top Z#2',       '°C'),
@@ -260,7 +260,6 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>',
         ))
 
-    # เพิ่มเส้นมาตรฐานถ้ามีการระบุ hline
     if hline is not None:
         fig.add_hline(
             y=hline, 
@@ -300,7 +299,7 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
     )
     return fig
 
-def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, title, y1_range, y1_title, y2_title, hline_left=None):
+def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, title, y1_range, y1_title, y2_title, hline_left=None, y2_range=None):
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     ts = [r['ts'] for r in data]
     
@@ -322,7 +321,6 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>',
         ), secondary_y=True)
 
-    # เพิ่มเส้นมาตรฐานให้แกนซ้าย
     if hline_left is not None:
         fig.add_hline(
             y=hline_left, 
@@ -352,7 +350,11 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
     )
     
     fig.update_yaxes(range=y1_range, title_text=y1_title, title_font=dict(size=14), secondary_y=False)
-    fig.update_yaxes(title_text=y2_title, title_font=dict(size=14), secondary_y=True, showgrid=False)
+    
+    if y2_range:
+        fig.update_yaxes(range=y2_range, title_text=y2_title, title_font=dict(size=14), secondary_y=True, showgrid=False)
+    else:
+        fig.update_yaxes(title_text=y2_title, title_font=dict(size=14), secondary_y=True, showgrid=False)
         
     fig.update_xaxes(
         tickformat='%d/%m\n%H:%M',
@@ -477,14 +479,15 @@ with tab_chart:
     if fig_bot: st.plotly_chart(fig_bot, use_container_width=True, theme="streamlit")
     st.markdown('<br>', unsafe_allow_html=True)
 
+    # ── เช็คเครื่องเพื่อปรับ Scale Dryer ──
     dry_chs = [ch for ch in active_channels if ch[0] in ['CH016','CH017']]
-    fig_dry = render_single_chart(data, dry_chs, COLORS_DRY, f'Dryer Zones Temperature ({machine_type})', [150, 400], '°C')
+    dry_y_range = [150, 350] if machine_type == 'NB1' else [150, 400]
+    fig_dry = render_single_chart(data, dry_chs, COLORS_DRY, f'Dryer Zones Temperature ({machine_type})', dry_y_range, '°C')
     if fig_dry: st.plotly_chart(fig_dry, use_container_width=True, theme="streamlit")
     st.markdown('<br>', unsafe_allow_html=True)
     
     if machine_type == 'NB2':
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH018']]
-        # ปรับ Range เป็น 0-150 และเพิ่มเส้น Hline ที่ 100
         fig_o2 = render_single_chart(data, o2_chs, COLORS_O2_NB2, 'O2 Concentration Level', [0, 150], 'ppm', hline=100)
         if fig_o2: st.plotly_chart(fig_o2, use_container_width=True, theme="streamlit")
         
@@ -492,12 +495,13 @@ with tab_chart:
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH019']]
         n2_chs = [ch for ch in active_channels if ch[0] == 'CH018']
         
-        # ปรับ Range O2 เป็น 0-150 และเพิ่มเส้น Hline ที่ 100
+        # ── NB1: ปรับ N2 Range (y2_range) เป็น 0-1000 ──
         fig_o2_n2 = render_dual_axis_chart(
             data, o2_chs, n2_chs, 
             COLORS_O2_NB1, COLORS_N2, 
             'O2 Concentration & N2 Flow Rate', 
-            [0, 150], 'O2 (ppm)', 'N2 (m3/hr)', hline_left=100
+            [0, 150], 'O2 (ppm)', 'N2 (m3/hr)', 
+            hline_left=100, y2_range=[0, 1000]
         )
         if fig_o2_n2: st.plotly_chart(fig_o2_n2, use_container_width=True, theme="streamlit")
         st.markdown('<br>', unsafe_allow_html=True)
