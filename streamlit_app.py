@@ -43,7 +43,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Constants & Configuration ─────────────────────────────────────────────────
-# NB1 Channels 
+# NB1 Channels
 CH_NB1 = [
     ('CH001', 'Top Z#1',       '°C'),
     ('CH002', 'Top Z#2',       '°C'),
@@ -257,7 +257,7 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
         fig.add_trace(go.Scatter(
             x=ts, y=[r[ch] for r in data],
             name=name, mode='lines',
-            line=dict(color=color, width=1.5, shape='spline'), # ── เพิ่ม shape='spline' ให้เส้นสมูท ──
+            line=dict(color=color, width=1.0), # เส้นความหนา 1.0 (สมจริงแบบ Yokogawa) และตัด shape='spline' ออก
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.1f}}<extra></extra>',
         ))
 
@@ -292,7 +292,7 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
         color = colors_left[i] if isinstance(colors_left, list) else colors_left.get(ch, '#888')
         fig.add_trace(go.Scatter(
             x=ts, y=[r[ch] for r in data], name=name, mode='lines', 
-            line=dict(color=color, width=1.5, shape='spline'), # ── เพิ่ม shape='spline' ให้เส้นสมูท ──
+            line=dict(color=color, width=1.0), # เส้นความหนา 1.0 และตัด shape='spline' ออก
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.1f}}<extra></extra>',
         ), secondary_y=False)
 
@@ -300,7 +300,7 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
         color = colors_right[i] if isinstance(colors_right, list) else colors_right.get(ch, '#888')
         fig.add_trace(go.Scatter(
             x=ts, y=[r[ch] for r in data], name=name, mode='lines', 
-            line=dict(color=color, width=1.5, dash='dot', shape='spline'), # ── เพิ่ม shape='spline' ให้เส้นสมูท ──
+            line=dict(color=color, width=1.0, dash='dot'), # เส้นความหนา 1.0 และตัด shape='spline' ออก
             hovertemplate=f'<b>{name}</b>: %{{y:.0f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.0f}}<extra></extra>',
         ), secondary_y=True)
 
@@ -445,30 +445,30 @@ with tab_chart:
     
     tb_y_range = [540, 650] if machine_type == 'NB1' else [400, 650]
     
+    # ส่ง theme="plotly_dark" เพื่อจำลองหน้าตาแบบ YOKOGAWA UI
     top_chs = [ch for ch in active_channels if ch[0] in ['CH001','CH002','CH003','CH004','CH005','CH006','CH007']]
     fig_top = render_single_chart(data, top_chs, COLORS_TOP, f'Top Zones Temperature ({machine_type})', tb_y_range, '°C')
-    if fig_top: st.plotly_chart(fig_top, use_container_width=True, theme="streamlit")
+    if fig_top: st.plotly_chart(fig_top, use_container_width=True, theme="plotly_dark")
     st.markdown('<br>', unsafe_allow_html=True)
 
     bot_chs = [ch for ch in active_channels if ch[0] in ['CH008','CH009','CH010','CH011','CH012','CH013','CH014']]
     fig_bot = render_single_chart(data, bot_chs, COLORS_BOT, f'Bottom Zones Temperature ({machine_type})', tb_y_range, '°C')
-    if fig_bot: st.plotly_chart(fig_bot, use_container_width=True, theme="streamlit")
+    if fig_bot: st.plotly_chart(fig_bot, use_container_width=True, theme="plotly_dark")
     st.markdown('<br>', unsafe_allow_html=True)
 
     dry_chs = [ch for ch in active_channels if ch[0] in ['CH016','CH017']]
     dry_y_range = [150, 350] if machine_type == 'NB1' else [150, 400]
     fig_dry = render_single_chart(data, dry_chs, COLORS_DRY, f'Dryer Zones Temperature ({machine_type})', dry_y_range, '°C')
-    if fig_dry: st.plotly_chart(fig_dry, use_container_width=True, theme="streamlit")
+    if fig_dry: st.plotly_chart(fig_dry, use_container_width=True, theme="plotly_dark")
     st.markdown('<br>', unsafe_allow_html=True)
     
     if machine_type == 'NB2':
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH018']]
         fig_o2 = render_single_chart(data, o2_chs, COLORS_O2_NB2, 'O2 Concentration Level', [0, 150], 'ppm', hline=100)
-        if fig_o2: st.plotly_chart(fig_o2, use_container_width=True, theme="streamlit")
+        if fig_o2: st.plotly_chart(fig_o2, use_container_width=True, theme="plotly_dark")
     else:
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH019']]
         n2_chs = [ch for ch in active_channels if ch[0] == 'CH018']
-        
         fig_o2_n2 = render_dual_axis_chart(
             data, o2_chs, n2_chs, 
             COLORS_O2_NB1, COLORS_N2, 
@@ -476,12 +476,12 @@ with tab_chart:
             [0, 150], 'O2 (ppm)', '', 
             hline_left=100, y2_range=[0, 5000]
         )
-        if fig_o2_n2: st.plotly_chart(fig_o2_n2, use_container_width=True, theme="streamlit")
+        if fig_o2_n2: st.plotly_chart(fig_o2_n2, use_container_width=True, theme="plotly_dark")
         st.markdown('<br>', unsafe_allow_html=True)
         
         dew_chs = [ch for ch in active_channels if ch[0] == 'CH020']
         fig_dew = render_single_chart(data, dew_chs, COLORS_DEW, 'Dew Point', [-100, -10], 'Cdp')
-        if fig_dew: st.plotly_chart(fig_dew, use_container_width=True, theme="streamlit")
+        if fig_dew: st.plotly_chart(fig_dew, use_container_width=True, theme="plotly_dark")
 
 with tab_summary:
     st.markdown(f'**ช่วงเวลาของข้อมูล:** {dt_start.strftime("%d/%m/%Y %H:%M")} → {dt_end.strftime("%d/%m/%Y %H:%M")}')
