@@ -45,7 +45,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Constants & Configuration ─────────────────────────────────────────────────
-# NB1 Channels (อ้างอิงจากภาพล่าสุด)
+# NB1 Channels
 CH_NB1 = [
     ('CH001', 'Top Z#1',       '°C'),
     ('CH002', 'Top Z#2',       '°C'),
@@ -174,55 +174,75 @@ def parse_dad(raw: bytes, active_channels) -> list:
         records.append(rec)
     return records
 
-# ── Excel Builder ─────────────────────────────────────────────────────────────
-def build_excel(data, dt_start, dt_end, active_channels):
-    hdr_fill  = PatternFill('solid', fgColor='1F4E79')
-    hdr_font  = Font(bold=True, color='FFFFFF', name='Arial', size=10)
-    norm_font = Font(name='Arial', size=9)
-    thin      = Side(border_style='thin', color='C0C8D0')
-    border    = Border(left=thin, right=thin, top=thin, bottom=thin)
-
-    def hcell(ws, col, row, val):
-        c = ws.cell(row, col, val)
-        c.fill=hdr_fill; c.font=hdr_font; c.border=border
-        c.alignment=Alignment(horizontal='center',vertical='center',wrap_text=True)
-        return c
-
-    def dcell(ws, col, row, val, fill=None, fmt=None, bold=False):
-        c = ws.cell(row, col, val)
-        c.fill=fill or PatternFill('solid',fgColor='FFFFFF')
-        c.font=Font(name='Arial',size=9,bold=bold); c.border=border
-        c.alignment=Alignment(horizontal='right' if isinstance(val,(int,float)) else 'left')
-        if fmt: c.number_format=fmt
-        return c
-
+# ── Excel Builder (รูปแบบคล้าย YOKOGAWA DAQSTANDARD) ───────────────────────────
+def build_excel(data, dt_start, dt_end, active_channels, mode_str, machine_type):
     wb = Workbook()
-    n  = len(data)
-    report_name = f'{dt_start.strftime("%d-%m-%Y %H.%M")} to {dt_end.strftime("%d-%m-%Y %H.%M")}'
+    ws = wb.active
+    ws.title = 'Data Viewer'
 
-    ws = wb.active; ws.title='Raw Data'
-    ws['A1'] = f'DAD Report — {report_name} | {n:,} records'
-    ws.merge_cells(f'A1:{get_column_letter(3+len(active_channels))}1')
-    ws['A1'].font=Font(bold=True,name='Arial',size=12,color='1F4E79')
-    ws.row_dimensions[1].height=22
-    hcell(ws,1,2,'Timestamp'); hcell(ws,2,2,'Date'); hcell(ws,3,2,'Time')
-    for i,(ch,name,unit) in enumerate(active_channels):
-        hcell(ws,4+i,2,f'{name}\n({ch})\n[{unit}]')
-    ws.row_dimensions[2].height=48
+    # Metadata Header
+    ws['A1'] = "YOKOGAWA Recorder Data Analysis Report"
+    ws['A1'].font = Font(bold=True, size=12, color='1F4E79')
     
-    for ri,rec in enumerate(data,start=3):
-        ts=rec['ts']; dp=ts.strftime('%Y/%m/%d'); tp=ts.strftime('%H:%M:%S')
-        bg=PatternFill('solid',fgColor='FFFFFF')
-        dcell(ws,1,ri,ts.strftime('%Y/%m/%d %H:%M:%S'),bg)
-        dcell(ws,2,ri,dp,bg); dcell(ws,3,ri,tp,bg)
-        for i,(ch,_,_) in enumerate(active_channels):
-            c=ws.cell(ri,4+i,rec[ch]); c.fill=bg; c.font=norm_font
-            c.border=border; c.alignment=Alignment(horizontal='right'); c.number_format='0.0'
-            
-    ws.column_dimensions['A'].width=22; ws.column_dimensions['B'].width=13; ws.column_dimensions['C'].width=10
-    for i in range(len(active_channels)): ws.column_dimensions[get_column_letter(4+i)].width=14
-    ws.freeze_panes='A3'; ws.auto_filter.ref=f'A2:{get_column_letter(3+len(active_channels))}{n+2}'
+    ws['A3'] = "Machine Type"
+    ws['B3'] = machine_type
+    ws['A4'] = "Data Count"
+    ws['B4'] = len(data)
+    ws['A5'] = "Start Time"
+    ws['B5'] = dt_start.strftime("%Y/%m/%d %H:%M:%S")
+    ws['A6'] = "Stop Time"
+    ws['B6'] = dt_end.strftime("%Y/%m/%d %H:%M:%S")
+    ws['A7'] = "Value Mode"
+    ws['B7'] = mode_str
+    
+    # Headers styling
+    hdr_fill = PatternFill('solid', fgColor='F0F4F8')
+    hdr_font = Font(bold=True, size=9)
+    norm_font = Font(name='Arial', size=9)
+    thin = Side(border_style='thin', color='D0D0D0')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
+    # Multi-row headers (Ch., Tag, Unit)
+    ws.cell(row=9, column=1, value="Ch.").font = hdr_font
+    ws.cell(row=10, column=1, value="Tag").font = hdr_font
+    ws.cell(row=11, column=1, value="Unit").font = hdr_font
+    
+    c_date = ws.cell(row=12, column=1, value="Date")
+    c_date.font, c_date.border, c_date.fill = hdr_font, border, hdr_fill
+    
+    c_time = ws.cell(row=12, column=2, value="Time")
+    c_time.font, c_time.border, c_time.fill = hdr_font, border, hdr_fill
+
+    for i, (ch, name, unit) in enumerate(active_channels):
+        col = i + 3
+        ws.cell(row=9, column=col, value=ch).font = norm_font
+        ws.cell(row=10, column=col, value=name).font = norm_font
+        ws.cell(row=11, column=col, value=unit).font = norm_font
+        
+        c = ws.cell(row=12, column=col, value=mode_str)
+        c.font, c.border, c.fill = hdr_font, border, hdr_fill
+        c.alignment = Alignment(horizontal='right')
+
+    # Data Rows
+    for ri, rec in enumerate(data, start=13):
+        ts = rec['ts']
+        ws.cell(row=ri, column=1, value=ts.strftime('%Y/%m/%d')).font = norm_font
+        ws.cell(row=ri, column=2, value=ts.strftime('%H:%M:%S')).font = norm_font
+        
+        for i, (ch, _, _) in enumerate(active_channels):
+            val = rec[ch]
+            c = ws.cell(row=ri, column=i+3, value=val)
+            c.font = norm_font
+            c.number_format = '0.0'
+
+    # Auto-adjust column width
+    ws.column_dimensions['A'].width = 12
+    ws.column_dimensions['B'].width = 10
+    for i in range(len(active_channels)):
+        ws.column_dimensions[get_column_letter(i+3)].width = 11
+        
+    ws.freeze_panes = 'A13'
+    
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -496,7 +516,8 @@ with tab_download:
     
     if st.button('📊 กดเพื่อสร้างไฟล์ Excel', type='primary'):
         with st.spinner('⏳ ระบบกำลังเตรียมไฟล์ Excel...'):
-            excel_data = build_excel(data, dt_start, dt_end, active_channels)
+            mode_str = value_mode.split()[0]
+            excel_data = build_excel(data, dt_start, dt_end, active_channels, mode_str, machine_type)
             fname = f'DAD_Report_{machine_type}_{dt_start.strftime("%Y%m%d_%H%M")}.xlsx'
             
             st.download_button(
