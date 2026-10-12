@@ -257,7 +257,7 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
         fig.add_trace(go.Scatter(
             x=ts, y=[r[ch] for r in data],
             name=name, mode='lines',
-            line=dict(color=color, width=1.5, shape='spline'), # ── เปิดใช้งานเส้นสมูท (spline) ──
+            line=dict(color=color, width=1.5), # ── เอา shape='spline' ออก เพื่อให้เส้นแสดงการแกว่งตัวแบบซิกแซกตรงตามจริง ──
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.1f}}<extra></extra>',
         ))
 
@@ -270,6 +270,7 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
         )
 
     fig.update_layout(
+        template='plotly_dark',
         title=dict(text=title, font=dict(size=18, weight="bold")),
         height=450, hovermode='x unified', hoverlabel=dict(font_size=12, namelength=30),
         legend=dict(
@@ -277,7 +278,6 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
             xanchor="left", x=1.02, font=dict(size=12), itemsizing='constant'
         ),
         margin=dict(l=60, r=150, t=60, b=40),
-        # นำ template='plotly_dark' ออกเพื่อให้กลับไปใช้พื้นหลังสีสว่างตามต้องการ
     )
     
     if y_range: fig.update_yaxes(range=y_range, title_text=y_title, title_font=dict(size=14))
@@ -293,7 +293,7 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
         color = colors_left[i] if isinstance(colors_left, list) else colors_left.get(ch, '#888')
         fig.add_trace(go.Scatter(
             x=ts, y=[r[ch] for r in data], name=name, mode='lines', 
-            line=dict(color=color, width=1.5, shape='spline'), # ── เปิดใช้งานเส้นสมูท (spline) ──
+            line=dict(color=color, width=1.5), # ── เอา shape='spline' ออก ──
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.1f}}<extra></extra>',
         ), secondary_y=False)
 
@@ -301,7 +301,7 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
         color = colors_right[i] if isinstance(colors_right, list) else colors_right.get(ch, '#888')
         fig.add_trace(go.Scatter(
             x=ts, y=[r[ch] for r in data], name=name, mode='lines', 
-            line=dict(color=color, width=1.5, dash='dot', shape='spline'), # ── เปิดใช้งานเส้นสมูท (spline) ──
+            line=dict(color=color, width=1.5, dash='dot'), # ── เอา shape='spline' ออก ──
             hovertemplate=f'<b>{name}</b>: %{{y:.0f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.0f}}<extra></extra>',
         ), secondary_y=True)
 
@@ -313,6 +313,7 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
         )
 
     fig.update_layout(
+        template='plotly_dark',
         title=dict(text=title, font=dict(size=18, weight="bold")),
         height=450, hovermode='x unified', hoverlabel=dict(font_size=12, namelength=30),
         legend=dict(
@@ -320,7 +321,6 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
             xanchor="left", x=1.08, font=dict(size=12), itemsizing='constant'
         ),
         margin=dict(l=60, r=180, t=60, b=40),
-        # นำ template='plotly_dark' ออกเพื่อให้กลับไปใช้พื้นหลังสีสว่างตามต้องการ
     )
     
     fig.update_yaxes(range=y1_range, title_text=y1_title, title_font=dict(size=14), secondary_y=False)
@@ -449,7 +449,7 @@ with tab_chart:
     
     top_chs = [ch for ch in active_channels if ch[0] in ['CH001','CH002','CH003','CH004','CH005','CH006','CH007']]
     fig_top = render_single_chart(data, top_chs, COLORS_TOP, f'Top Zones Temperature ({machine_type})', tb_y_range, '°C')
-    # ใช้ theme="streamlit" คืนค่าเพื่อให้ได้พื้นหลังสีสว่างตามค่าตั้งต้น
+    # ใช้ theme="streamlit" คืนค่าเพื่อให้ได้พื้นหลังสีสว่าง
     if fig_top: st.plotly_chart(fig_top, use_container_width=True, theme="streamlit")
     st.markdown('<br>', unsafe_allow_html=True)
 
