@@ -156,7 +156,6 @@ def parse_dad(raw: bytes, active_channels) -> list:
         except ValueError: continue
             
         rec = {'ts': ts}
-        # ── แกะตัวแปร name ออกมาด้วย เพื่อนำมาใช้เช็คเงื่อนไขหาร ──
         for ch, name, unit in active_channels:
             ch_idx = int(ch.replace('CH', '')) - 1
             data_pos = base + 8 + (ch_idx * bpc)
@@ -173,7 +172,7 @@ def parse_dad(raw: bytes, active_channels) -> list:
             else:
                 min_v = max_v = v1
             
-            # ── แก้ไขเงื่อนไขตัวหาร โดยเช็คจากชื่อ tag (name) ──
+            # ── แก้ไขเงื่อนไขตัวหาร โดยเช็คจากชื่อ tag (name) แทน ──
             divisor = 1.0 if name == 'N2 .1' else 10.0
             
             if v1 not in (-32768, -32767, 32767, 32766) and (-30000 < v1 < 30000):
@@ -368,6 +367,15 @@ with st.sidebar:
 if not uploaded:
     st.info('👉 กรุณาอัปโหลดไฟล์ .DAD จากแถบเมนูด้านซ้ายเพื่อเริ่มต้นสร้างรายงานวิเคราะห์ข้อมูล')
     st.stop()
+
+# ── เพิ่มโค้ดส่วนนี้เพื่อแสดงชื่อไฟล์ที่เลือก ──
+file_names = ", ".join([f.name for f in uploaded])
+st.markdown(f"""
+<div style="padding: 12px 18px; background-color: var(--secondary-background-color); border-radius: 8px; margin-bottom: 20px; font-size: 0.95rem; color: var(--text-color); border: 1px solid rgba(128,128,128,0.2);">
+    <strong>📂 ไฟล์ที่กำลังวิเคราะห์:</strong> <span style="opacity: 0.85;">{file_names}</span>
+</div>
+""", unsafe_allow_html=True)
+# ──────────────────────────────────────────
 
 files_data = [(f.name, f.read()) for f in uploaded]
 machine_type, active_channels = check_machine_type([f[0] for f in files_data])
