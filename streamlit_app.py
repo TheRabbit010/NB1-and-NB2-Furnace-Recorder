@@ -63,7 +63,7 @@ CH_NB1 = [
     ('CH019', 'ENTRANCE O2',   'ppm'),
     ('CH016', 'Dryer #1',      '°C'),
     ('CH017', 'Dryer #2',      '°C'),
-    ('CH018', 'N2 .1',         ''),
+    ('CH018', 'N2 .1',         'm3/hr'),
     ('CH020', 'DEW POINT',     'Cdp'),
 ]
 
@@ -156,7 +156,8 @@ def parse_dad(raw: bytes, active_channels) -> list:
         except ValueError: continue
             
         rec = {'ts': ts}
-        for ch, _, unit in active_channels:
+        # ── แกะตัวแปร name ออกมาด้วย เพื่อนำมาใช้เช็คเงื่อนไขหาร ──
+        for ch, name, unit in active_channels:
             ch_idx = int(ch.replace('CH', '')) - 1
             data_pos = base + 8 + (ch_idx * bpc)
             
@@ -172,7 +173,8 @@ def parse_dad(raw: bytes, active_channels) -> list:
             else:
                 min_v = max_v = v1
             
-            divisor = 1.0 if ch == 'CH018' else 10.0
+            # ── แก้ไขเงื่อนไขตัวหาร โดยเช็คจากชื่อ tag (name) ──
+            divisor = 1.0 if name == 'N2 .1' else 10.0
             
             if v1 not in (-32768, -32767, 32767, 32766) and (-30000 < v1 < 30000):
                 min_val = min_v / divisor
@@ -257,7 +259,7 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
         fig.add_trace(go.Scatter(
             x=ts, y=[r[ch] for r in data],
             name=name, mode='lines',
-            line=dict(color=color, width=1.5), # ── เอา shape='spline' ออก เพื่อให้เส้นแสดงการแกว่งตัวแบบซิกแซกตรงตามจริง ──
+            line=dict(color=color, width=1.5), 
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.1f}}<extra></extra>',
         ))
 
@@ -292,7 +294,7 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
         color = colors_left[i] if isinstance(colors_left, list) else colors_left.get(ch, '#888')
         fig.add_trace(go.Scatter(
             x=ts, y=[r[ch] for r in data], name=name, mode='lines', 
-            line=dict(color=color, width=1.5), # ── เอา shape='spline' ออก ──
+            line=dict(color=color, width=1.5), 
             hovertemplate=f'<b>{name}</b>: %{{y:.1f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.1f}}<extra></extra>',
         ), secondary_y=False)
 
@@ -300,7 +302,7 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
         color = colors_right[i] if isinstance(colors_right, list) else colors_right.get(ch, '#888')
         fig.add_trace(go.Scatter(
             x=ts, y=[r[ch] for r in data], name=name, mode='lines', 
-            line=dict(color=color, width=1.5, dash='dot'), # ── เอา shape='spline' ออก ──
+            line=dict(color=color, width=1.5, dash='dot'),
             hovertemplate=f'<b>{name}</b>: %{{y:.0f}} {unit}<extra></extra>' if unit else f'<b>{name}</b>: %{{y:.0f}}<extra></extra>',
         ), secondary_y=True)
 
@@ -447,7 +449,6 @@ with tab_chart:
     
     top_chs = [ch for ch in active_channels if ch[0] in ['CH001','CH002','CH003','CH004','CH005','CH006','CH007']]
     fig_top = render_single_chart(data, top_chs, COLORS_TOP, f'Top Zones Temperature ({machine_type})', tb_y_range, '°C')
-    # ใช้ theme="streamlit" เพื่อให้ได้สีพื้นหลังกลับมาตามค่าตั้งต้น
     if fig_top: st.plotly_chart(fig_top, use_container_width=True, theme="streamlit")
     st.markdown('<br>', unsafe_allow_html=True)
 
