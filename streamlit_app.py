@@ -94,11 +94,9 @@ def find_dad_params(raw):
     max_search = min(80000, len(raw) - 1000)
     for offset in range(1000, max_search):
         yr, mo, dy, hr, mn, sc = raw[offset:offset+6]
-        # ตรวจสอบค่า Header ของ Timestamp เบื้องต้น
         if 0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59:
             for rs in range(24, 1024, 2): 
                 valid_chain = True
-                # บังคับเช็ค Record ถัดๆ ไปอีก 3 ตัว เพื่อลดการเดาผิดพลาด (False Positive)
                 for step in range(1, 4):
                     check_pos = offset + (rs * step)
                     if check_pos + 6 >= len(raw):
@@ -109,14 +107,14 @@ def find_dad_params(raw):
                 
                 if valid_chain:
                     return offset, rs
-    return None, None # ไม่พบโครงสร้างที่สมบูรณ์
+    return None, None 
 
 def parse_dad(raw: bytes, active_channels) -> list:
     records = []
     offset, record_size = find_dad_params(raw)
     
     if offset is None or record_size is None:
-        return records # คืนค่าว่างถ้าหาโครงสร้างไฟล์ไม่เจอ ป้องกัน Error ทะลุ
+        return records 
         
     bpc = 4 if record_size >= 70 else 2
     body_len = len(raw) - offset
@@ -155,17 +153,16 @@ def parse_dad(raw: bytes, active_channels) -> list:
             
             divisor = 1.0 if name == 'N2 .1' else 10.0
             
-            # กรองค่าที่ผิดปกติหรือค่า Error Code ของ Sensor
             if v1 not in (-32768, -32767, 32767, 32766) and (-32000 < v1 < 32000):
                 min_val = min_v / divisor
                 max_val = max_v / divisor
                 
-                # จำกัดเพดานข้อมูลให้อยู่ในความเป็นจริง (ป้องกันกราฟพุ่งทะลุ 1000 องศา)
-                if -200.0 <= min_val <= 1500.0 and -200.0 <= max_val <= 1500.0:
+                # ลิมิตกว้างเพื่อครอบคลุมค่า N2 ที่หลักพัน และ Dew Point ที่ติดลบ
+                if -1000.0 <= min_val <= 10000.0 and -1000.0 <= max_val <= 10000.0:
                     rec[f'{ch}_min'] = round(min_val, 1)
                     rec[f'{ch}_max'] = round(max_val, 1)
                     rec[f'{ch}_avg'] = round((min_val + max_val) / 2.0, 1)
-                    rec[ch] = rec[f'{ch}_avg'] # Default fallback
+                    rec[ch] = rec[f'{ch}_avg']
                 else:
                     rec[f'{ch}_min'] = rec[f'{ch}_max'] = rec[f'{ch}_avg'] = rec[ch] = None
             else:
@@ -173,7 +170,7 @@ def parse_dad(raw: bytes, active_channels) -> list:
         records.append(rec)
     return records
 
-# ── Excel & Chart Builders (คงเดิม) ──────────────────────────────────────────
+# ── Excel Builder ─────────────────────────────────────────────────────────────
 def build_excel(data, dt_start, dt_end, active_channels, mode_str, machine_type):
     wb = Workbook()
     ws = wb.active
@@ -223,6 +220,7 @@ def build_excel(data, dt_start, dt_end, active_channels, mode_str, machine_type)
     buf.seek(0)
     return buf.getvalue()
 
+# ── Chart Builder ─────────────────────────────────────────────────────────────
 def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hline=None):
     if not ch_list: return None
     fig = go.Figure()
@@ -240,8 +238,13 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
         fig.add_hline(y=hline, line_dash="dash", line_color="#FF4B4B", line_width=1.5, annotation_text=f"Standard {hline} {y_title}", annotation_position="bottom right", annotation_font=dict(color="#FF4B4B", size=12))
 
     fig.update_layout(title=dict(text=title, font=dict(size=18, weight="bold")), height=450, hovermode='x unified', hoverlabel=dict(font_size=12, namelength=30), legend=dict(title="Channels", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02, font=dict(size=12), itemsizing='constant'), margin=dict(l=60, r=150, t=60, b=40))
-    if y_range: fig.update_yaxes(range=y_range, title_text=y_title, title_font=dict(size=14))
-    else: fig.update_yaxes(title_text=y_title, title_font=dict(size=14))
+    
+    # ล็อคสเกลแกน Y
+    if y_range: 
+        fig.update_layout(yaxis=dict(range=y_range, title_text=y_title, title_font=dict(size=14)))
+    else: 
+        fig.update_layout(yaxis=dict(title_text=y_title, title_font=dict(size=14)))
+        
     fig.update_xaxes(tickformat='%d/%m\n%H:%M', tickfont=dict(size=11), showticklabels=True)
     return fig
 
@@ -261,9 +264,13 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
         fig.add_hline(y=hline_left, line_dash="dash", line_color="#FF4B4B", line_width=1.5, annotation_text=f"Standard {hline_left} {y1_title.split()[0]}", annotation_position="bottom right", annotation_font=dict(color="#FF4B4B", size=12), secondary_y=False)
 
     fig.update_layout(title=dict(text=title, font=dict(size=18, weight="bold")), height=450, hovermode='x unified', hoverlabel=dict(font_size=12, namelength=30), legend=dict(title="Channels", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.08, font=dict(size=12), itemsizing='constant'), margin=dict(l=60, r=180, t=60, b=40))
-    fig.update_yaxes(range=y1_range, title_text=y1_title, title_font=dict(size=14), secondary_y=False)
-    if y2_range: fig.update_yaxes(range=y2_range, title_text=y2_title, title_font=dict(size=14), secondary_y=True, showgrid=False)
-    else: fig.update_yaxes(title_text=y2_title, title_font=dict(size=14), secondary_y=True, showgrid=False)
+    
+    # ล็อคสเกลแกน Y ทั้งซ้ายและขวา
+    if y1_range:
+        fig.update_layout(yaxis=dict(range=y1_range, title_text=y1_title, title_font=dict(size=14)))
+    if y2_range: 
+        fig.update_layout(yaxis2=dict(range=y2_range, title_text=y2_title, title_font=dict(size=14), showgrid=False))
+        
     fig.update_xaxes(tickformat='%d/%m\n%H:%M', tickfont=dict(size=11), showticklabels=True)
     return fig
 
@@ -317,13 +324,12 @@ def process_dad_files(files_d, mode_k, act_channels):
     all_records = []
     for fname, raw in files_d:
         recs = parse_dad(raw, act_channels)
-        if len(recs) > 10: all_records.extend(recs[3:-2]) # ตัดหัวท้ายกันข้อมูลขาดตอน
+        if len(recs) > 10: all_records.extend(recs[3:-2])
         else: all_records.extend(recs)
         
     if not all_records: return []
     all_records.sort(key=lambda x: x['ts'])
     
-    # รวมข้อมูล Streak แบบเดิม
     if len(all_records) > 0:
         streaks = []
         current_streak = [all_records[0]]
@@ -347,14 +353,17 @@ def process_dad_files(files_d, mode_k, act_channels):
                 new_r[ch] = r.get(f'{ch}{mode_k}')
             unique.append(new_r)
             
-    # --- เพิ่ม Noise Filter (Rolling Median) แก้ไขกราฟเส้นหยัก/Spike ---
     df = pd.DataFrame(unique)
     if not df.empty:
         df.set_index('ts', inplace=True)
         for col in df.columns:
-            # สมูทกราฟด้วย Median Window=3 ป้องกันข้อมูลกระตุกจาก Binary Parsing Error
+            # ใช้ Numeric ดักไว้ และ Smooth กราฟเพื่อลดความผิดปกติ
+            df[col] = pd.to_numeric(df[col], errors='coerce')
             df[col] = df[col].rolling(window=3, min_periods=1, center=True).median()
-        unique = df.reset_index().to_dict('records')
+        
+        # แปลง NaN กลับเป็น None เพื่อให้ Plotly แสดงผลจุดที่หายไปได้อย่างราบรื่น
+        df = df.reset_index()
+        unique = df.where(pd.notnull(df), None).to_dict('records')
         
     return unique
 
@@ -406,12 +415,16 @@ with tab_chart:
     else:
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH019']]
         n2_chs = [ch for ch in active_channels if ch[0] == 'CH018']
+        
+        # 🔴 N2 ยืนยันสเกลตายตัวที่ 0-5000 แกนฝั่งขวา
         fig_o2_n2 = render_dual_axis_chart(data, o2_chs, n2_chs, COLORS_O2_NB1, COLORS_N2, 'O2 Concentration & N2 Flow Rate', [0, 150], 'O2 (ppm)', '', hline_left=100, y2_range=[0, 5000])
         if fig_o2_n2: st.plotly_chart(fig_o2_n2, use_container_width=True, theme="streamlit")
         
         st.markdown('<br>', unsafe_allow_html=True)
         dew_chs = [ch for ch in active_channels if ch[0] == 'CH020']
-        fig_dew = render_single_chart(data, dew_chs, COLORS_DEW, 'Dew Point', [-100, -10], 'Cdp')
+        
+        # 🔴 Dew Point ขยายสเกลเพื่อให้รองรับค่าลบ -100 ถึง 10 
+        fig_dew = render_single_chart(data, dew_chs, COLORS_DEW, 'Dew Point', [-100, 10], 'Cdp')
         if fig_dew: st.plotly_chart(fig_dew, use_container_width=True, theme="streamlit")
 
 with tab_summary:
