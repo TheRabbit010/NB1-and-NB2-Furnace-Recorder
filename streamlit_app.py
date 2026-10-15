@@ -89,7 +89,7 @@ def check_machine_type(filenames):
 # ── Auto-Detect BPC & Parser For Binary .DAD ─────────────────────────────────
 def find_dad_params(raw):
     """ ปรับปรุงให้ค้นหารูปแบบโครงสร้างที่แม่นยำขึ้น โดยบังคับให้เช็คต่อเนื่อง 4 Records """
-    if len(raw) < 5000: return None, None # ไฟล์เล็กเกินไป ข้าม
+    if len(raw) < 5000: return None, None 
     
     max_search = min(80000, len(raw) - 1000)
     for offset in range(1000, max_search):
@@ -239,7 +239,7 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
 
     fig.update_layout(title=dict(text=title, font=dict(size=18, weight="bold")), height=450, hovermode='x unified', hoverlabel=dict(font_size=12, namelength=30), legend=dict(title="Channels", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02, font=dict(size=12), itemsizing='constant'), margin=dict(l=60, r=150, t=60, b=40))
     
-    # ล็อคสเกลแกน Y
+    # ล็อคสเกลแกน Y อย่างเด็ดขาด
     if y_range: 
         fig.update_layout(yaxis=dict(range=y_range, title_text=y_title, title_font=dict(size=14)))
     else: 
@@ -265,7 +265,7 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
 
     fig.update_layout(title=dict(text=title, font=dict(size=18, weight="bold")), height=450, hovermode='x unified', hoverlabel=dict(font_size=12, namelength=30), legend=dict(title="Channels", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.08, font=dict(size=12), itemsizing='constant'), margin=dict(l=60, r=180, t=60, b=40))
     
-    # ล็อคสเกลแกน Y ทั้งซ้ายและขวา
+    # ล็อคสเกลแกน Y ทั้งซ้ายและขวาอย่างเด็ดขาด
     if y1_range:
         fig.update_layout(yaxis=dict(range=y1_range, title_text=y1_title, title_font=dict(size=14)))
     if y2_range: 
@@ -357,11 +357,9 @@ def process_dad_files(files_d, mode_k, act_channels):
     if not df.empty:
         df.set_index('ts', inplace=True)
         for col in df.columns:
-            # ใช้ Numeric ดักไว้ และ Smooth กราฟเพื่อลดความผิดปกติ
             df[col] = pd.to_numeric(df[col], errors='coerce')
             df[col] = df[col].rolling(window=3, min_periods=1, center=True).median()
         
-        # แปลง NaN กลับเป็น None เพื่อให้ Plotly แสดงผลจุดที่หายไปได้อย่างราบรื่น
         df = df.reset_index()
         unique = df.where(pd.notnull(df), None).to_dict('records')
         
@@ -423,9 +421,18 @@ with tab_chart:
         st.markdown('<br>', unsafe_allow_html=True)
         dew_chs = [ch for ch in active_channels if ch[0] == 'CH020']
         
-        # 🔴 Dew Point ขยายสเกลเพื่อให้รองรับค่าลบ -100 ถึง 10 
+        # 🔴 Dew Point บังคับสเกล 10 ถึง -100
         fig_dew = render_single_chart(data, dew_chs, COLORS_DEW, 'Dew Point', [-100, 10], 'Cdp')
-        if fig_dew: st.plotly_chart(fig_dew, use_container_width=True, theme="streamlit")
+        if fig_dew: 
+            # บังคับ Autoranged=False เพื่อไม่ให้กราฟหลุดขอบถ้ามีค่าเกิน 0
+            fig_dew.update_layout(
+                yaxis=dict(
+                    range=[-100, 10], 
+                    autorange=False,
+                    title_text='Cdp'
+                )
+            )
+            st.plotly_chart(fig_dew, use_container_width=True, theme="streamlit")
 
 with tab_summary:
     st.markdown(f'**ช่วงเวลาของข้อมูล:** {dt_start.strftime("%d/%m/%Y %H:%M")} → {dt_end.strftime("%d/%m/%Y %H:%M")}')
