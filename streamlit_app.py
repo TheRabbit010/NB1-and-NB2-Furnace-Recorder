@@ -88,23 +88,46 @@ def check_machine_type(filenames):
 
 # ── Auto-Detect BPC & Parser For Binary .DAD ─────────────────────────────────
 def find_dad_params(raw):
-    """ ปรับปรุงให้ค้นหารูปแบบโครงสร้างที่แม่นยำขึ้น โดยบังคับให้เช็คต่อเนื่อง 4 Records """
+    """ ปรับปรุงการค้นหาให้เข้มงวด ป้องกันการเจอข้อมูลขยะแล้วมองเป็นวันที่ """
     if len(raw) < 5000: return None, None 
     
     max_search = min(80000, len(raw) - 1000)
     for offset in range(1000, max_search):
         yr, mo, dy, hr, mn, sc = raw[offset:offset+6]
         if 0 <= yr <= 99 and 1 <= mo <= 12 and 1 <= dy <= 31 and 0 <= hr <= 23 and 0 <= mn <= 59 and 0 <= sc <= 59:
-            for rs in range(24, 1024, 2): 
+            try:
+                y_full = 2000 + yr if yr < 80 else 1900 + yr
+                t1 = datetime(y_full, mo, dy, hr, mn, sc)
+            except ValueError:
+                continue
+            
+            # ขยาย Record size เผื่อ NB2 มีขนาด block ที่แตกต่างจาก NB1
+            for rs in range(16, 2048, 2): 
                 valid_chain = True
-                for step in range(1, 4):
+                prev_t = t1
+                
+                # เช็คไปข้างหน้า 4 Records ต้องมี Timestamp ที่เดินไปข้างหน้าอย่างสมเหตุสมผล
+                for step in range(1, 5):
                     check_pos = offset + (rs * step)
                     if check_pos + 6 >= len(raw):
                         valid_chain = False; break
+                        
                     y2, m2, d2, h2, min2, s2 = raw[check_pos:check_pos+6]
                     if not (0 <= y2 <= 99 and 1 <= m2 <= 12 and 1 <= d2 <= 31 and 0 <= h2 <= 23 and 0 <= min2 <= 59 and 0 <= s2 <= 59):
                         valid_chain = False; break
-                
+                        
+                    try:
+                        y2_f = 2000 + y2 if y2 < 80 else 1900 + y2
+                        t2 = datetime(y2_f, m2, d2, h2, min2, s2)
+                        
+                        # ค่าเวลาจะต้องเพิ่มขึ้น และไม่กระโดดเกินไปนัก (สมมติเก็บข้อมูลไม่เกิน 1 ชั่วโมงต่อ record)
+                        delta = (t2 - prev_t).total_seconds()
+                        if not (0 < delta <= 3600):
+                            valid_chain = False; break
+                        prev_t = t2
+                    except ValueError:
+                        valid_chain = False; break
+                        
                 if valid_chain:
                     return offset, rs
     return None, None 
@@ -157,7 +180,6 @@ def parse_dad(raw: bytes, active_channels) -> list:
                 min_val = min_v / divisor
                 max_val = max_v / divisor
                 
-                # ลิมิตกว้างเพื่อครอบคลุมค่า N2 ที่หลักพัน และ Dew Point ที่ติดลบ
                 if -1000.0 <= min_val <= 10000.0 and -1000.0 <= max_val <= 10000.0:
                     rec[f'{ch}_min'] = round(min_val, 1)
                     rec[f'{ch}_max'] = round(max_val, 1)
@@ -239,7 +261,6 @@ def render_single_chart(data, ch_list, colors_ref, title, y_range, y_title, hlin
 
     fig.update_layout(title=dict(text=title, font=dict(size=18, weight="bold")), height=450, hovermode='x unified', hoverlabel=dict(font_size=12, namelength=30), legend=dict(title="Channels", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02, font=dict(size=12), itemsizing='constant'), margin=dict(l=60, r=150, t=60, b=40))
     
-    # ล็อคสเกลแกน Y อย่างเด็ดขาด
     if y_range: 
         fig.update_layout(yaxis=dict(range=y_range, title_text=y_title, title_font=dict(size=14)))
     else: 
@@ -265,7 +286,6 @@ def render_dual_axis_chart(data, ch_left, ch_right, colors_left, colors_right, t
 
     fig.update_layout(title=dict(text=title, font=dict(size=18, weight="bold")), height=450, hovermode='x unified', hoverlabel=dict(font_size=12, namelength=30), legend=dict(title="Channels", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.08, font=dict(size=12), itemsizing='constant'), margin=dict(l=60, r=180, t=60, b=40))
     
-    # ล็อคสเกลแกน Y ทั้งซ้ายและขวาอย่างเด็ดขาด
     if y1_range:
         fig.update_layout(yaxis=dict(range=y1_range, title_text=y1_title, title_font=dict(size=14)))
     if y2_range: 
@@ -414,17 +434,14 @@ with tab_chart:
         o2_chs = [ch for ch in active_channels if ch[0] in ['CH015', 'CH019']]
         n2_chs = [ch for ch in active_channels if ch[0] == 'CH018']
         
-        # 🔴 N2 ยืนยันสเกลตายตัวที่ 0-5000 แกนฝั่งขวา
         fig_o2_n2 = render_dual_axis_chart(data, o2_chs, n2_chs, COLORS_O2_NB1, COLORS_N2, 'O2 Concentration & N2 Flow Rate', [0, 150], 'O2 (ppm)', '', hline_left=100, y2_range=[0, 5000])
         if fig_o2_n2: st.plotly_chart(fig_o2_n2, use_container_width=True, theme="streamlit")
         
         st.markdown('<br>', unsafe_allow_html=True)
         dew_chs = [ch for ch in active_channels if ch[0] == 'CH020']
         
-        # 🔴 Dew Point บังคับสเกล 10 ถึง -100
         fig_dew = render_single_chart(data, dew_chs, COLORS_DEW, 'Dew Point', [-100, 10], 'Cdp')
         if fig_dew: 
-            # บังคับ Autoranged=False เพื่อไม่ให้กราฟหลุดขอบถ้ามีค่าเกิน 0
             fig_dew.update_layout(
                 yaxis=dict(
                     range=[-100, 10], 
